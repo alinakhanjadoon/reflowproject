@@ -255,3 +255,4 @@ CREATE POLICY "Members manage artifacts" ON public.wf_run_artifacts
     FOR ALL TO authenticated
     USING (public.is_run_visible(run_id))
     WITH CHECK (public.is_run_visible(run_id));
+
