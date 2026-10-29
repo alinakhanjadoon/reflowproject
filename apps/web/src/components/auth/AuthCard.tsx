@@ -94,6 +94,29 @@ export function AuthCard({
     }
     checkUser();
   }, []);
+function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message || '';
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('Network request failed') ||
+    msg.includes('Load failed')
+  );
+}
+
+function checkSupabaseConfig(): void {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (
+    !supabaseUrl ||
+    supabaseUrl.includes('placeholder.supabase.co') ||
+    supabaseUrl.includes('your-project.supabase.co')
+  ) {
+    throw new Error(
+      'Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY with valid project credentials in your deployment environment variables (Vercel) or apps/web/.env.local.'
+    );
+  }
+}
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,10 +137,7 @@ export function AuthCard({
     setSignInLoading(true);
 
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (!supabaseUrl || supabaseUrl.includes('placeholder.supabase.co')) {
-        throw new Error('Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in apps/web/.env.local.');
-      }
+      checkSupabaseConfig();
 
       const supabase = createClient();
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -147,8 +167,8 @@ export function AuthCard({
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
-        if (err.message.includes('Failed to fetch')) {
-          setSignInError('Unable to connect to Supabase. Please ensure your Supabase instance is reachable and configured in apps/web/.env.local.');
+        if (isNetworkError(err)) {
+          setSignInError('Unable to connect to Supabase. Please ensure your Supabase instance is active and reachable, and that NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set.');
         } else {
           setSignInError(err.message);
         }
@@ -186,10 +206,7 @@ export function AuthCard({
     setSignUpLoading(true);
 
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (!supabaseUrl || supabaseUrl.includes('placeholder.supabase.co')) {
-        throw new Error('Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in apps/web/.env.local.');
-      }
+      checkSupabaseConfig();
 
       const supabase = createClient();
       const { data: authData, error } = await supabase.auth.signUp({
@@ -234,8 +251,8 @@ export function AuthCard({
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
-        if (err.message.includes('Failed to fetch')) {
-          setSignUpError('Unable to connect to Supabase. Please ensure your Supabase instance is reachable and configured in apps/web/.env.local.');
+        if (isNetworkError(err)) {
+          setSignUpError('Unable to connect to Supabase. Please ensure your Supabase instance is active and reachable, and that NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set.');
         } else {
           setSignUpError(err.message);
         }
