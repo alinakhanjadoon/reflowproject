@@ -24,6 +24,12 @@ const reflowBridge = {
   onRecordingUpdate: (callback) => {
     ipcRenderer.on('recorder-update', (event, data) => callback(data));
   },
+  onDeeplinkRecord: (callback) => {
+    ipcRenderer.on('deeplink-record', (event, data) => callback(data));
+  },
+  onRecordingStarted: (callback) => {
+    ipcRenderer.on('recording-started', (event, data) => callback(data));
+  },
 };
 
 // Expose canonical ReFlow API

@@ -505,12 +505,25 @@ class HttpBridge {
     await this.activeRecorder.start();
 
     // Navigate to initial target URL if specified
-    if (targetUrl && !targetUrl.startsWith('about:') && this.activeRecorder.page) {
+    if (targetUrl && !targetUrl.startsWith('about:')) {
       try {
-        await this.activeRecorder.page.bringToFront();
-        const currentUrl = typeof this.activeRecorder.page.url === 'function' ? this.activeRecorder.page.url() : '';
-        if (currentUrl === 'about:blank' || currentUrl.startsWith('chrome://')) {
-          await this.activeRecorder.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        let page = this.activeRecorder.page;
+        if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+          const pages = (this.activeRecorder.browser && typeof this.activeRecorder.browser.pages === 'function')
+            ? await this.activeRecorder.browser.pages().catch(() => [])
+            : [];
+          page = pages.find((p) => p && !p.isClosed()) || (await this.activeRecorder.browser.newPage());
+          this.activeRecorder.page = page;
+        }
+
+        if (page) {
+          await page.bringToFront().catch(() => {});
+          const currentUrl = typeof page.url === 'function' ? page.url() : '';
+          const normTarget = targetUrl.replace(/\/$/, '');
+          const normCurrent = currentUrl.replace(/\/$/, '');
+          if (normCurrent !== normTarget) {
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+          }
         }
       } catch (e) {
         console.warn('[HTTPBridge] Page navigate notice:', e.message);

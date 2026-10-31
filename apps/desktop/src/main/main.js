@@ -46,6 +46,36 @@ function minimizeToTray() {
   }
 }
 
+function handleDeepLinkUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return;
+  console.log('[Main] Processing deep link URL:', rawUrl);
+  restoreMainWindow();
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol === 'reflow:' && (parsed.hostname === 'record' || parsed.pathname.includes('record'))) {
+      const targetUrl = parsed.searchParams.get('url') || parsed.searchParams.get('startUrl') || 'https://google.com';
+      const sessionName = parsed.searchParams.get('name') || `portal-workflow-${Date.now()}`;
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('deeplink-record', { url: targetUrl, name: sessionName });
+      }
+
+      httpBridge.startRecording({ url: targetUrl, name: sessionName })
+        .then((res) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('recording-started', res);
+          }
+        })
+        .catch((err) => {
+          console.warn('[Main] Deep-link startRecording notice:', err.message);
+        });
+    }
+  } catch (err) {
+    console.warn('[Main] Invalid deep-link URL:', rawUrl, err.message);
+  }
+}
+
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -56,7 +86,7 @@ if (!gotTheLock) {
     // Parse protocol url on Windows if passed via command line
     const urlArg = (commandLine || []).find((arg) => arg.startsWith('reflow://'));
     if (urlArg) {
-      console.log('[Main] Received protocol URL from second-instance:', urlArg);
+      handleDeepLinkUrl(urlArg);
     }
   });
 }
@@ -77,8 +107,7 @@ try {
 // macOS open-url event for protocol activation
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  restoreMainWindow();
-  console.log('[Main] Received protocol URL on macOS:', url);
+  handleDeepLinkUrl(url);
 });
 
 function createWindow() {

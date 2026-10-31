@@ -492,6 +492,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  if (typeof clientBridge.onDeeplinkRecord === 'function') {
+    clientBridge.onDeeplinkRecord((data) => {
+      recorderModalOverlay.classList.remove('hidden');
+      if (data && data.url) {
+        recStartUrl.value = data.url;
+      }
+    });
+  }
+
+  if (typeof clientBridge.onRecordingStarted === 'function') {
+    clientBridge.onRecordingStarted((res) => {
+      recorderModalOverlay.classList.remove('hidden');
+      updateRecorderModalUI(res);
+    });
+  }
+
   // -------------------------------------------------------------
   // REAL-TIME STATUS UPDATES
   // -------------------------------------------------------------

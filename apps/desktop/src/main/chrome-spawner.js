@@ -296,11 +296,15 @@ class ChromeSpawner {
   }
 
   _cleanLocks() {
-    for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'RunningChromeVersion']) {
       try {
         const lockPath = path.join(this.profileDir, lock);
-        if (fs.existsSync(lockPath)) {
+        try {
           fs.unlinkSync(lockPath);
+        } catch (e) {
+          if (e.code !== 'ENOENT') {
+            try { fs.rmSync(lockPath, { force: true }); } catch {}
+          }
         }
       } catch {}
     }

@@ -837,46 +837,72 @@ export function CreatePortalModal({
     if (e) e.preventDefault();
     setFormError(null);
 
-    if (!recordName.trim()) {
-      setFormError('Portal name is required.');
-      return;
-    }
-    if (!recordUrl.trim()) {
-      setFormError('Starting portal URL is required.');
+    const rawUrl = recordUrl.trim();
+    if (!rawUrl) {
+      setFormError('Please enter a Website URL to record.');
       return;
     }
 
-    let normalizedUrl = recordUrl.trim();
+    let normalizedUrl = rawUrl;
     if (!/^https?:\/\//i.test(normalizedUrl)) {
       normalizedUrl = `https://${normalizedUrl}`;
     }
 
+    let finalName = recordName.trim();
+    if (!finalName) {
+      try {
+        const parsed = new URL(normalizedUrl);
+        const host = parsed.hostname.replace(/^www\./, '');
+        finalName = `${host.charAt(0).toUpperCase() + host.slice(1)} Workflow`;
+      } catch {
+        finalName = 'Recorded Workflow';
+      }
+      setRecordName(finalName);
+    }
+
     setRecordingPhase('starting');
+    let localStarted = false;
+
+    // Try local 127.0.0.1 bridge first
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const res = await fetch('http://127.0.0.1:49152/record/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: recordName.trim(),
+          name: finalName,
           url: normalizedUrl,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to start recording');
+      if (res.ok) {
+        localStarted = true;
+        setRecordedActions([]);
+        setActionCount(0);
+        setCapturedRecipe(null);
+        setRecordingPhase('recording');
       }
+    } catch {}
 
-      setRecordedActions([]);
-      setActionCount(0);
-      setCapturedRecipe(null);
-      setRecordingPhase('recording');
-    } catch (err: unknown) {
-      const msg = cloudRunnerOnline
-        ? "Browser security prevented direct 127.0.0.1 bridge access. Please click 'Record Workflow' directly in your ReFlow Desktop app window to start recording."
-        : (err instanceof Error ? err.message : 'Could not reach desktop recording agent');
-      setFormError(msg);
-      setRecordingPhase('idle');
+    // If local bridge fetch was blocked by browser security (e.g. Mixed Content), launch via desktop protocol
+    if (!localStarted) {
+      const deepLink = `reflow://record?url=${encodeURIComponent(normalizedUrl)}&name=${encodeURIComponent(finalName)}`;
+      try {
+        window.location.href = deepLink;
+        setRecordedActions([]);
+        setActionCount(0);
+        setCapturedRecipe(null);
+        setRecordingPhase('recording');
+      } catch (err: unknown) {
+        const msg = cloudRunnerOnline
+          ? "Please click 'Record Workflow' directly in your ReFlow Desktop app window to start recording."
+          : (err instanceof Error ? err.message : 'Could not reach desktop recording agent');
+        setFormError(msg);
+        setRecordingPhase('idle');
+      }
     }
   };
 
@@ -1655,10 +1681,10 @@ export function CreatePortalModal({
               {cloudRunnerOnline && !agentConnected && (
                 <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-300 flex items-start gap-2.5">
                   <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 flex-1">
                     <p className="font-medium text-white">Your desktop worker is connected & active!</p>
                     <p className="text-slate-300">
-                      To record your workflow, click the <span className="text-rose-400 font-semibold">🔴 Record Workflow</span> button directly in your <strong>ReFlow Desktop</strong> application on your screen.
+                      Enter your portal URL below and click <strong>Start recording</strong> to automatically launch Chrome and capture your workflow.
                     </p>
                   </div>
                 </div>
@@ -1669,14 +1695,13 @@ export function CreatePortalModal({
                 <form onSubmit={handleStartRecording} className="space-y-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Workflow name <span className="text-rose-400">*</span>
+                      Workflow name <span className="text-slate-500 text-[11px] font-normal">(optional)</span>
                     </label>
                     <input
                       type="text"
-                      required
                       value={recordName}
                       onChange={(e) => setRecordName(e.target.value)}
-                      placeholder="e.g. US Oil Invoice Capture"
+                      placeholder="e.g. US Oil Invoice Capture (auto-generated if empty)"
                       className="w-full rounded-xl border border-slate-700/80 bg-slate-950/70 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
                     />
                   </div>
@@ -1768,7 +1793,7 @@ export function CreatePortalModal({
                     </button>
                     <button
                       type="submit"
-                      disabled={(!agentConnected && !cloudRunnerOnline) || !recordName.trim() || !recordUrl.trim()}
+                      disabled={!agentConnected && !cloudRunnerOnline}
                       className="inline-flex items-center gap-2 w-full justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-500 disabled:opacity-40 cursor-pointer sm:w-auto"
                     >
                       <Circle className="h-3 w-3 fill-current text-white animate-pulse" /> Start recording

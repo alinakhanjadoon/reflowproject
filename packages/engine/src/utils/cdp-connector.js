@@ -85,14 +85,18 @@ async function ensureChromeRunning(port = 9222, defaultUrl = 'about:blank') {
 
   // Clean stale lock files from previous runs to prevent Chrome from immediately exiting
   for (const dir of [profileDir, path.join(os.tmpdir(), 'chrome-capture-profile')]) {
-    try {
-      const lockFile = path.join(dir, 'SingletonLock');
-      if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
-      const cookieLock = path.join(dir, 'SingletonCookie');
-      if (fs.existsSync(cookieLock)) fs.unlinkSync(cookieLock);
-      const socketLock = path.join(dir, 'SingletonSocket');
-      if (fs.existsSync(socketLock)) fs.unlinkSync(socketLock);
-    } catch {}
+    for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'RunningChromeVersion']) {
+      try {
+        const lockPath = path.join(dir, lock);
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (e) {
+          if (e.code !== 'ENOENT') {
+            try { fs.rmSync(lockPath, { force: true }); } catch {}
+          }
+        }
+      } catch {}
+    }
   }
 
   try {
