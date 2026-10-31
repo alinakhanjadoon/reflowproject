@@ -4,21 +4,24 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-function findBinaryPath(fileName: string): string | null {
-  const candidatePaths = [
-    path.resolve(process.cwd(), '../desktop/dist', fileName),
-    path.resolve(process.cwd(), 'apps/desktop/dist', fileName),
-    path.resolve(process.cwd(), 'dist', fileName),
-    path.resolve(process.cwd(), '../../apps/desktop/dist', fileName)
-  ];
+function findBinaryPath(fileNames: string | string[]): string | null {
+  const names = Array.isArray(fileNames) ? fileNames : [fileNames];
+  for (const fileName of names) {
+    const candidatePaths = [
+      path.resolve(process.cwd(), '../desktop/dist', fileName),
+      path.resolve(process.cwd(), 'apps/desktop/dist', fileName),
+      path.resolve(process.cwd(), 'dist', fileName),
+      path.resolve(process.cwd(), '../../apps/desktop/dist', fileName)
+    ];
 
-  for (const candidate of candidatePaths) {
-    try {
-      if (fs.existsSync(/*turbopackIgnore: true*/ candidate)) {
-        return candidate;
+    for (const candidate of candidatePaths) {
+      try {
+        if (fs.existsSync(/*turbopackIgnore: true*/ candidate)) {
+          return candidate;
+        }
+      } catch {
+        // Continue search on filesystem error
       }
-    } catch {
-      // Continue search on filesystem error
     }
   }
 
@@ -53,16 +56,21 @@ export async function GET(request: NextRequest) {
   const isMac = rawOs === 'mac' || rawOs === 'darwin' || rawType === 'dmg' || rawType === 'mac';
   const isPortable = rawType === 'portable' || rawType === 'zip';
 
-  let primaryFileName = 'ReFlow-Worker-Setup-1.0.0.exe';
+  let candidateNames = ['ReFlow-Worker-Setup-1.0.0.exe'];
 
   if (isMac) {
-    primaryFileName = 'ReFlow-Worker-1.0.0.dmg';
+    candidateNames = [
+      'ReFlow-Worker-Setup-1.0.0-mac-x64.dmg',
+      'ReFlow-Worker-1.0.0-mac-x64.dmg',
+      'ReFlow-Worker-1.0.0.dmg',
+      'ReFlow-Worker-1.0.0-mac-x64.zip'
+    ];
   } else if (isPortable) {
-    primaryFileName = 'ReFlow-Worker-Portable-1.0.0.exe';
+    candidateNames = ['ReFlow-Worker-Portable-1.0.0.exe'];
   }
 
-  const binaryPath = findBinaryPath(primaryFileName);
-  const fileName = binaryPath ? path.basename(binaryPath) : primaryFileName;
+  const binaryPath = findBinaryPath(candidateNames);
+  const fileName = binaryPath ? path.basename(binaryPath) : candidateNames[0];
 
   if (binaryPath) {
     try {
@@ -96,9 +104,10 @@ export async function GET(request: NextRequest) {
     ? process.env.DESKTOP_PORTABLE_DOWNLOAD_URL
     : process.env.DESKTOP_WIN_DOWNLOAD_URL;
 
+  const repoBase = process.env.NEXT_PUBLIC_GITHUB_REPO || 'https://github.com/alinakhanjadoon/reflowproject';
   const defaultGitHubReleaseUrl = isMac
-    ? 'https://github.com/AbuZar-Babar/ReFlow/releases/tag/Desktop-app'
-    : `https://github.com/AbuZar-Babar/ReFlow/releases/download/Desktop-app/${fileName}`;
+    ? `${repoBase}/releases/tag/Desktop-app`
+    : `${repoBase}/releases/download/Desktop-app/${fileName}`;
   const redirectTarget = customRemoteUrl || defaultGitHubReleaseUrl;
 
   return NextResponse.redirect(redirectTarget, 302);

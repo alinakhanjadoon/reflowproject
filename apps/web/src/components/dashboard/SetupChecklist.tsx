@@ -19,6 +19,7 @@ const DOWNLOAD_CLICKED_KEY = 'wf_setup_download_clicked';
 const DISMISSED_KEY = 'wf_setup_checklist_dismissed';
 
 const WINDOWS_DOWNLOAD_HREF = '/api/v1/runners/download?type=installer&os=windows';
+const MAC_DOWNLOAD_HREF = '/api/v1/runners/download?type=dmg&os=mac';
 
 interface SetupChecklistProps {
   workflowCount: number;
@@ -214,14 +215,24 @@ export function SetupChecklist({
               </div>
 
               {'download' in step.action ? (
-                <a
-                  href={WINDOWS_DOWNLOAD_HREF}
-                  onClick={handleDownload}
-                  className="inline-flex min-h-9 flex-shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--primary-color,#00d9e8)] px-3 py-2 text-xs font-semibold text-slate-950 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color,#00f0ff)]"
-                >
-                  <Download aria-hidden="true" className="h-3.5 w-3.5" />
-                  <span>{step.action.label}</span>
-                </a>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={WINDOWS_DOWNLOAD_HREF}
+                    onClick={handleDownload}
+                    className="inline-flex min-h-9 flex-shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--primary-color,#00d9e8)] px-3 py-2 text-xs font-semibold text-slate-950 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color,#00f0ff)]"
+                  >
+                    <Download aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>Download for Windows</span>
+                  </a>
+                  <a
+                    href={MAC_DOWNLOAD_HREF}
+                    onClick={handleDownload}
+                    className="inline-flex min-h-9 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--border-color,rgba(255,255,255,0.12))] px-3 py-2 text-xs font-medium text-[var(--foreground,#f8fafc)] transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color,#00f0ff)]"
+                  >
+                    <Download aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
+                    <span>Mac (.dmg)</span>
+                  </a>
+                </div>
               ) : (
                 <Link
                   href={step.action.href}
