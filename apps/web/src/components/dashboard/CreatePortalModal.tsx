@@ -185,6 +185,7 @@ export function CreatePortalModal({
 
   // Tab: Desktop Recording State
   const [agentConnected, setAgentConnected] = useState<boolean | null>(null);
+  const [cloudRunnerOnline, setCloudRunnerOnline] = useState<boolean>(false);
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [recordName, setRecordName] = useState('');
   const [recordUrl, setRecordUrl] = useState('');
@@ -212,19 +213,30 @@ export function CreatePortalModal({
   const checkDesktopHealth = async () => {
     try {
       setCheckingConnection(true);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch('http://127.0.0.1:49152/health', {
-        signal: controller.signal,
-        headers: { Accept: 'application/json' },
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        setAgentConnected(data.status === 'ok');
-      } else {
-        setAgentConnected(false);
-      }
+      let localOk = false;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch('http://127.0.0.1:49152/health', {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          localOk = data.status === 'ok';
+        }
+      } catch {}
+
+      setAgentConnected(localOk);
+
+      try {
+        const runnerRes = await fetch('/api/v1/runners', { cache: 'no-store' });
+        if (runnerRes.ok) {
+          const runnerData = await runnerRes.json();
+          setCloudRunnerOnline(Boolean(runnerData.is_online));
+        }
+      } catch {}
     } catch {
       setAgentConnected(false);
     } finally {
@@ -306,6 +318,13 @@ export function CreatePortalModal({
       } catch {
         if (isSubscribed) {
           setAgentConnected(false);
+          try {
+            const runnerRes = await fetch('/api/v1/runners', { cache: 'no-store' });
+            if (runnerRes.ok && isSubscribed) {
+              const runnerData = await runnerRes.json();
+              setCloudRunnerOnline(Boolean(runnerData.is_online));
+            }
+          } catch {}
         }
       }
     };
@@ -853,7 +872,9 @@ export function CreatePortalModal({
       setCapturedRecipe(null);
       setRecordingPhase('recording');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Could not reach desktop recording agent';
+      const msg = cloudRunnerOnline
+        ? "Browser security prevented direct 127.0.0.1 bridge access. Please click 'Record Workflow' directly in your ReFlow Desktop app window to start recording."
+        : (err instanceof Error ? err.message : 'Could not reach desktop recording agent');
       setFormError(msg);
       setRecordingPhase('idle');
     }
@@ -1592,6 +1613,17 @@ export function CreatePortalModal({
                       </span>
                       <span className="text-[11px] text-slate-500 font-mono">(127.0.0.1:49152)</span>
                     </>
+                  ) : cloudRunnerOnline === true ? (
+                    <>
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-xs font-semibold text-emerald-400">
+                        🟢 Desktop App Online
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-mono">(Cloud Paired)</span>
+                    </>
                   ) : (
                     <>
                       <span className="h-2.5 w-2.5 rounded-full bg-slate-500"></span>
@@ -1619,6 +1651,18 @@ export function CreatePortalModal({
                   )}
                 </button>
               </div>
+
+              {cloudRunnerOnline && !agentConnected && (
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-300 flex items-start gap-2.5">
+                  <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-medium text-white">Your desktop worker is connected & active!</p>
+                    <p className="text-slate-300">
+                      To record your workflow, click the <span className="text-rose-400 font-semibold">🔴 Record Workflow</span> button directly in your <strong>ReFlow Desktop</strong> application on your screen.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Phase 1: Pre-Recording Configuration */}
               {recordingPhase === 'idle' && (
@@ -1724,7 +1768,7 @@ export function CreatePortalModal({
                     </button>
                     <button
                       type="submit"
-                      disabled={!agentConnected || !recordName.trim() || !recordUrl.trim()}
+                      disabled={(!agentConnected && !cloudRunnerOnline) || !recordName.trim() || !recordUrl.trim()}
                       className="inline-flex items-center gap-2 w-full justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-500 disabled:opacity-40 cursor-pointer sm:w-auto"
                     >
                       <Circle className="h-3 w-3 fill-current text-white animate-pulse" /> Start recording
