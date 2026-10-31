@@ -27,7 +27,7 @@ class ConfigManager {
   getDefaults() {
     return {
       runnerToken: '',
-      cloudUrl: 'https://web-fawn-ten-55.vercel.app',
+      cloudUrl: 'https://reflowproject-web.vercel.app',
       browserMode: 'visible', // 'visible' | 'headless'
       targetFolder: this.defaultTargetFolder,
       autoStartRunner: true,

@@ -108,7 +108,7 @@ class RunnerController {
       const CloudClient = CloudClientModule.CloudClient || CloudClientModule;
 
       const cloudClient = new CloudClient({
-        baseUrl: config.cloudUrl || 'https://web-fawn-ten-55.vercel.app',
+        baseUrl: config.cloudUrl || 'https://reflowproject-web.vercel.app',
         token: config.runnerToken,
       });
 

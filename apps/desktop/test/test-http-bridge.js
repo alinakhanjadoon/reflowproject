@@ -117,12 +117,12 @@ async function runTests() {
   });
 
   // 4. CORS Preflight with Private Network Access from Vercel
-  await test('OPTIONS preflight from https://web-fawn-ten-55.vercel.app returns 204 with PNA headers', async () => {
+  await test('OPTIONS preflight from https://reflowproject-web.vercel.app returns 204 with PNA headers', async () => {
     const res = await makeRequest({
       method: 'OPTIONS',
       path: '/record/start',
       headers: {
-        Origin: 'https://web-fawn-ten-55.vercel.app',
+        Origin: 'https://reflowproject-web.vercel.app',
         'Access-Control-Request-Method': 'POST',
         'Access-Control-Request-Headers': 'Content-Type',
         'Access-Control-Request-Private-Network': 'true',
@@ -130,7 +130,7 @@ async function runTests() {
     });
 
     assert.strictEqual(res.statusCode, 204);
-    assert.strictEqual(res.headers['access-control-allow-origin'], 'https://web-fawn-ten-55.vercel.app');
+    assert.strictEqual(res.headers['access-control-allow-origin'], 'https://reflowproject-web.vercel.app');
     assert.strictEqual(res.headers['access-control-allow-private-network'], 'true');
     assert.strictEqual(res.headers['access-control-allow-credentials'], 'true');
     assert.ok(res.headers['access-control-allow-methods'].includes('POST'));
@@ -219,13 +219,13 @@ async function runTests() {
       method: 'GET',
       path: '/health',
       headers: {
-        Origin: 'https://web-fawn-ten-55.vercel.app',
+        Origin: 'https://reflowproject-web.vercel.app',
       },
     });
 
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.headers['access-control-allow-private-network'], 'true');
-    assert.strictEqual(res.headers['access-control-allow-origin'], 'https://web-fawn-ten-55.vercel.app');
+    assert.strictEqual(res.headers['access-control-allow-origin'], 'https://reflowproject-web.vercel.app');
     assert.deepStrictEqual(res.json, {
       status: 'ok',
       isRecording: false,

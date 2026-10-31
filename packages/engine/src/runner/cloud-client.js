@@ -136,7 +136,11 @@ class CloudClient {
       }
 
       if (!response.ok) {
-        const errorMsg = responseData?.error || responseData?.message || `HTTP ${response.status} ${response.statusText}`;
+        let rawError = responseData?.error || responseData?.message;
+        if (typeof rawError === 'object' && rawError !== null) {
+          rawError = rawError.message || rawError.error || JSON.stringify(rawError);
+        }
+        const errorMsg = rawError || `HTTP ${response.status} ${response.statusText}`;
         throw new CloudClientError(
           `Cloud API Error [${response.status}] ${path}: ${errorMsg}`,
           response.status,

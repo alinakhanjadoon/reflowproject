@@ -245,7 +245,7 @@ function updateTrayMenu() {
       label: 'Open Cloud Console (Web)',
       click: () => {
         const config = configManager.get();
-        shell.openExternal(`${config.cloudUrl || 'https://web-fawn-ten-55.vercel.app'}/dashboard`);
+        shell.openExternal(`${config.cloudUrl || 'https://reflowproject-web.vercel.app'}/dashboard`);
       },
     },
     {
@@ -349,7 +349,7 @@ app.whenReady().then(async () => {
       const CloudClientModule = engineResolver.requireEngine('src/runner/cloud-client');
       const CloudClient = CloudClientModule.CloudClient || CloudClientModule;
       const client = new CloudClient({
-        baseUrl: cfg.cloudUrl || 'https://web-fawn-ten-55.vercel.app',
+        baseUrl: cfg.cloudUrl || 'https://reflowproject-web.vercel.app',
         token: cfg.runnerToken,
       });
       return await client.testConnection();

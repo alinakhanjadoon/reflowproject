@@ -24,10 +24,10 @@ serverProc.stdout.on('data', (data) => {
 function runCurlTests() {
   try {
     console.log('\n--- CURL OPTIONS /record/start ---');
-    console.log(execSync('curl.exe -i -s -X OPTIONS http://127.0.0.1:49152/record/start -H "Origin: https://web-fawn-ten-55.vercel.app" -H "Access-Control-Request-Private-Network: true"').toString());
+    console.log(execSync('curl.exe -i -s -X OPTIONS http://127.0.0.1:49152/record/start -H "Origin: https://reflowproject-web.vercel.app" -H "Access-Control-Request-Private-Network: true"').toString());
 
     console.log('\n--- CURL GET /health ---');
-    console.log(execSync('curl.exe -i -s http://127.0.0.1:49152/health -H "Origin: https://web-fawn-ten-55.vercel.app"').toString());
+    console.log(execSync('curl.exe -i -s http://127.0.0.1:49152/health -H "Origin: https://reflowproject-web.vercel.app"').toString());
 
     console.log('\n--- CURL GET /record/status ---');
     console.log(execSync('curl.exe -i -s http://127.0.0.1:49152/record/status').toString());

@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup Screen
   const setupForm = document.getElementById('setupForm');
   const inputSetupToken = document.getElementById('inputSetupToken');
+  const inputSetupCloudUrl = document.getElementById('inputSetupCloudUrl');
   const btnToggleTokenMask = document.getElementById('btnToggleTokenMask');
   const btnConnectWorkspace = document.getElementById('btnConnectWorkspace');
   const setupFeedback = document.getElementById('setupFeedback');
@@ -159,7 +160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnGetTokenHelp.addEventListener('click', () => {
-    const cloudUrl = currentConfig.cloudUrl || 'https://web-fawn-ten-55.vercel.app';
+    const cloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
     clientBridge.openExternal(`${cloudUrl}/dashboard`);
   });
 
@@ -167,6 +168,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     e.preventDefault();
     const token = inputSetupToken.value.trim().replace(/[\.\s]+$/, '');
     if (!token) return;
+
+    const targetCloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
 
     btnConnectWorkspace.disabled = true;
     btnConnectWorkspace.innerText = 'Verifying Token...';
@@ -176,7 +179,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // 1. Test token connection
       const testRes = await clientBridge.testConnection({
         runnerToken: token,
-        cloudUrl: currentConfig.cloudUrl || 'https://web-fawn-ten-55.vercel.app',
+        cloudUrl: targetCloudUrl,
       });
 
       if (!testRes || !testRes.connected) {
@@ -187,6 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // 2. Save config & auto-start runner
       currentConfig = await clientBridge.saveConfig({
         runnerToken: token,
+        cloudUrl: targetCloudUrl,
       });
 
       applyConfigToUI(currentConfig);
@@ -263,7 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnOpenWebDashboard.addEventListener('click', () => {
-    const cloudUrl = currentConfig.cloudUrl || 'https://web-fawn-ten-55.vercel.app';
+    const cloudUrl = currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
     clientBridge.openExternal(`${cloudUrl}/dashboard`);
   });
 
@@ -289,7 +293,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     prefTargetFolder.value = currentConfig.targetFolder || '';
     chkAutoStart.checked = currentConfig.autoStartRunner !== false;
     chkMinimizeTray.checked = currentConfig.minimizeToTray !== false;
-    prefCloudUrl.value = currentConfig.cloudUrl || 'https://web-fawn-ten-55.vercel.app';
+    prefCloudUrl.value = currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
 
     // Masked token
     if (currentConfig.runnerToken) {
@@ -517,6 +521,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (cfg.runnerToken) {
       const tokenPreview = cfg.runnerToken.slice(0, 12);
       displayOrgName.innerText = `Workspace (${tokenPreview}...)`;
+    }
+    if (inputSetupCloudUrl) {
+      inputSetupCloudUrl.value = cfg.cloudUrl || 'https://reflowproject-web.vercel.app';
     }
   }
 

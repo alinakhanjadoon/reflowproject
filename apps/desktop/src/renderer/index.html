@@ -59,6 +59,13 @@
             </div>
           </div>
 
+          <details class="advanced-section" style="margin-top: 10px; margin-bottom: 12px; text-align: left;">
+            <summary class="advanced-summary" style="font-size: 11px; cursor: pointer; color: var(--text-muted, #94a3b8); outline: none;">Advanced: Cloud Endpoint</summary>
+            <div class="pref-group mt-2">
+              <input type="text" id="inputSetupCloudUrl" class="folder-input" style="font-size: 11px; padding: 6px 10px;" placeholder="https://reflowproject-web.vercel.app" />
+            </div>
+          </details>
+
           <div id="setupFeedback" class="feedback-box hidden"></div>
 
           <button type="submit" id="btnConnectWorkspace" class="btn-primary-large">
@@ -220,7 +227,7 @@
       <details class="advanced-section">
         <summary class="advanced-summary">Advanced: Cloud Endpoint</summary>
         <div class="pref-group mt-2">
-          <input type="text" id="prefCloudUrl" class="folder-input" placeholder="https://web-fawn-ten-55.vercel.app" />
+          <input type="text" id="prefCloudUrl" class="folder-input" placeholder="https://reflowproject-web.vercel.app" />
           <p class="pref-hint">ReFlow cloud server control plane endpoint.</p>
         </div>
       </details>
