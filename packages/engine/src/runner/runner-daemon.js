@@ -283,14 +283,19 @@ class RunnerDaemon {
       const rawPortalName = workflow?.name || def.name || def.metadata?.name || workflow?.metadata?.name || run.workflow_name || 'DefaultPortal';
       const sanitizedPortalName = sanitizePortalName(rawPortalName);
 
-      const startUrl = workflow?.portal_url ||
+      // Scan steps for actual action URL if portal_url is placeholder or generic
+      const realStepUrl = steps.find(s => s && s.url && !s.url.startsWith('about:') && !s.url.startsWith('chrome://') && !s.url.includes('example.com'))?.url;
+
+      const rawCandidateUrl = workflow?.portal_url ||
         def.portal_url ||
         def.metadata?.startUrl ||
         workflow?.metadata?.startUrl ||
         workflow?.startUrl ||
-        workflow?.targetUrl ||
-        (steps[0] && steps[0].url) ||
-        'about:blank';
+        workflow?.targetUrl;
+
+      const startUrl = (rawCandidateUrl && !rawCandidateUrl.includes('example.com') && !rawCandidateUrl.startsWith('about:'))
+        ? rawCandidateUrl
+        : (realStepUrl || rawCandidateUrl || (steps[0] && steps[0].url) || 'about:blank');
 
       const metadata = def.metadata || workflow?.metadata || {
         name: rawPortalName,
@@ -421,6 +426,8 @@ class RunnerDaemon {
         workflowName: sanitizedPortalName || rawPortalName || 'workflow',
         targetUrl: startUrl,
         structuredDownloadsDir: runTargetDir,
+        baseDownloadsDir: path.dirname(runTargetDir),
+        baseRunDir: path.join(path.dirname(runTargetDir), 'Run'),
         itemFilter: itemFilter,
         rowFilter: rowFilter,
         loopLimit: loopLimit,

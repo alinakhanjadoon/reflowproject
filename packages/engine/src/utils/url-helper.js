@@ -118,13 +118,43 @@ function resolveTargetUrl(targetUrl) {
 function extractWorkflowStartUrl(workflow) {
   if (!workflow) return null;
 
+  // 1. Check actions and steps first for any real non-placeholder URL
+  const actions = workflow.actions ||
+    workflow.steps ||
+    workflow.recordingData?.actions ||
+    workflow.workflow_definition?.steps ||
+    workflow.workflow_definition?.actions ||
+    [];
+
+  for (const act of actions) {
+    if (!act) continue;
+    const actionUrl = act.url || act.pageUrl || act.frame?.location;
+    if (actionUrl && typeof actionUrl === 'string' && !isInternalBrowserUrl(actionUrl) && !actionUrl.includes('example.com')) {
+      const resolved = resolveTargetUrl(actionUrl);
+      if (resolved) return resolved;
+    }
+  }
+
+  // 2. Check direct candidates for real non-placeholder URLs
   const directCandidates = [
+    workflow.portal_url,
     workflow.targetUrl,
+    workflow.startUrl,
     workflow.recordingData?.metadata?.startUrl,
     workflow.metadata?.startUrl,
-    workflow.startUrl
+    workflow.workflow_definition?.portal_url,
+    workflow.workflow_definition?.start_url,
+    workflow.workflow_definition?.metadata?.startUrl
   ];
 
+  for (const candidate of directCandidates) {
+    if (candidate && typeof candidate === 'string' && !isInternalBrowserUrl(candidate) && !candidate.includes('example.com')) {
+      const resolved = resolveTargetUrl(candidate);
+      if (resolved) return resolved;
+    }
+  }
+
+  // 3. Fallback to any valid candidate (including placeholder if nothing else exists)
   for (const candidate of directCandidates) {
     if (candidate && typeof candidate === 'string' && !isInternalBrowserUrl(candidate)) {
       const resolved = resolveTargetUrl(candidate);
@@ -132,8 +162,7 @@ function extractWorkflowStartUrl(workflow) {
     }
   }
 
-  // Fall back to scanning actions/steps for a valid URL or href attribute
-  const actions = workflow.actions || workflow.steps || workflow.recordingData?.actions || [];
+  // 4. Fall back to scanning actions/steps for any valid URL or href attribute
   for (const act of actions) {
     if (!act) continue;
     const actionUrl = act.url || act.pageUrl || act.frame?.location;

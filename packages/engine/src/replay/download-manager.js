@@ -12,10 +12,24 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const logger = require('../utils/logger');
+
+function getSafeStorageBase(sub = 'downloads') {
+  const defaultHomeDir = path.join(os.homedir(), 'Downloads', 'ReFlow', sub);
+  try {
+    const cwd = process.cwd();
+    if (!cwd || cwd === '/' || cwd === '\\' || /^[A-Za-z]:\\?$/.test(cwd)) {
+      return defaultHomeDir;
+    }
+    return path.resolve(cwd, sub);
+  } catch {
+    return defaultHomeDir;
+  }
+}
 
 function formatRunTimestamp(date = new Date()) {
   if (typeof date === 'string') {
@@ -75,14 +89,14 @@ class DownloadManager {
     this.workflowId = opts.workflowId || null;
 
     // Dedicated per-execution downloads isolation: downloads/<workflow-slug>/<execution-id>/
-    const baseDir = opts.baseDownloadsDir || path.resolve(process.cwd(), 'downloads');
+    const baseDir = opts.baseDownloadsDir || getSafeStorageBase('downloads');
     this.executionDirectory = path.resolve(baseDir, this.workflowSlug, this.executionId);
     this.manifestPath = path.join(this.executionDirectory, 'manifest.json');
 
     // Structured Run/ hierarchy: Run/<YYYY-MM-DD_HH-mm-ss>/<portal_domain>/<Category>/
     this.runTimestamp = opts.runTimestamp || formatRunTimestamp(opts.startedAt || new Date());
     this.portalDomain = extractPortalDomain(opts.portalDomain || opts.portalUrl || opts.targetUrl || opts.startUrl || 'customerportal.usoil.com');
-    this.baseRunDir = opts.baseRunDir || path.resolve(process.cwd(), 'Run');
+    this.baseRunDir = opts.baseRunDir || getSafeStorageBase('Run');
     this.runTimestampDir = path.resolve(this.baseRunDir, this.runTimestamp);
     this.runDomainDir = path.resolve(this.runTimestampDir, this.portalDomain);
 
@@ -96,13 +110,30 @@ class DownloadManager {
   }
 
   _initDirectory() {
-    if (!fs.existsSync(this.executionDirectory)) {
-      fs.mkdirSync(this.executionDirectory, { recursive: true });
+    try {
+      if (!fs.existsSync(this.executionDirectory)) {
+        fs.mkdirSync(this.executionDirectory, { recursive: true });
+      }
+    } catch (err) {
+      logger.warn(`Could not create execution directory ${this.executionDirectory}: ${err.message}. Falling back to tmp.`);
+      this.executionDirectory = path.join(os.tmpdir(), 'ReFlow', 'downloads', this.workflowSlug, this.executionId);
+      try { fs.mkdirSync(this.executionDirectory, { recursive: true }); } catch {}
+      this.manifestPath = path.join(this.executionDirectory, 'manifest.json');
     }
-    if (!fs.existsSync(this.runDomainDir)) {
-      fs.mkdirSync(this.runDomainDir, { recursive: true });
+
+    try {
+      if (!fs.existsSync(this.runDomainDir)) {
+        fs.mkdirSync(this.runDomainDir, { recursive: true });
+      }
+    } catch (err) {
+      logger.warn(`Could not create run domain directory ${this.runDomainDir}: ${err.message}. Falling back to tmp.`);
+      this.runDomainDir = path.join(os.tmpdir(), 'ReFlow', 'Run', this.runTimestamp, this.portalDomain);
+      try { fs.mkdirSync(this.runDomainDir, { recursive: true }); } catch {}
     }
-    this._saveManifest();
+
+    try {
+      this._saveManifest();
+    } catch {}
   }
 
   /**

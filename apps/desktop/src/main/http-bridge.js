@@ -625,10 +625,42 @@ class HttpBridge {
         ? recipe.actions
         : (Array.isArray(this.actions) && this.actions.length > 0 ? this.actions : []);
       const workflowName = recipe.metadata?.name || this.sessionMeta?.name || `Recorded Workflow - ${new Date().toLocaleDateString()}`;
-      const portalUrl = recipe.metadata?.startUrl || this.sessionMeta?.url || (rawActions.find(a => a && a.url)?.url) || 'https://google.com';
 
-      const actions = rawActions.length > 0 ? rawActions : [
-        { type: 'navigate', url: portalUrl, description: 'Open vendor portal URL' }
+      const realActionUrl = rawActions.find(a => a && a.url && !a.url.startsWith('about:') && !a.url.startsWith('chrome://') && !a.url.includes('example.com'))?.url
+        || rawActions.find(a => a && a.url && !a.url.startsWith('about:') && !a.url.startsWith('chrome://'))?.url;
+
+      const portalUrl = (realActionUrl && (
+        !recipe.metadata?.startUrl ||
+        recipe.metadata.startUrl.startsWith('about:') ||
+        recipe.metadata.startUrl.includes('example.com') ||
+        !this.sessionMeta?.url ||
+        this.sessionMeta.url.startsWith('about:') ||
+        this.sessionMeta.url.includes('example.com')
+      )) ? realActionUrl : (
+        (recipe.metadata?.startUrl && !recipe.metadata.startUrl.includes('example.com') && !recipe.metadata.startUrl.startsWith('about:'))
+          ? recipe.metadata.startUrl
+          : ((this.sessionMeta?.url && !this.sessionMeta.url.includes('example.com') && !this.sessionMeta.url.startsWith('about:'))
+            ? this.sessionMeta.url
+            : (realActionUrl || 'https://google.com'))
+      );
+
+      // Ensure the first step is an explicit navigation to portalUrl if not already present
+      const hasInitialNav = rawActions.length > 0 && (
+        rawActions[0].type === 'navigate' ||
+        rawActions[0].type === 'NAVIGATE' ||
+        rawActions[0].action === 'NAVIGATE'
+      );
+      const actions = hasInitialNav ? rawActions : [
+        {
+          id: `act_nav_${Date.now()}`,
+          type: 'navigate',
+          action: 'NAVIGATE',
+          name: 'Open Portal',
+          url: portalUrl,
+          description: `Navigate to ${portalUrl}`,
+          timestamp: rawActions[0]?.timestamp ? rawActions[0].timestamp - 1000 : Date.now(),
+        },
+        ...rawActions
       ];
 
       const payload = {
@@ -636,7 +668,15 @@ class HttpBridge {
         portal_url: portalUrl,
         workflow_definition: {
           ...recipe,
+          metadata: {
+            ...(recipe.metadata || {}),
+            startUrl: portalUrl,
+            name: workflowName,
+          },
+          start_url: portalUrl,
+          portal_url: portalUrl,
           steps: actions,
+          actions: actions,
           schedule: 'manual',
           target_folder: config.targetFolder || '',
           upload_to_cloud: true,

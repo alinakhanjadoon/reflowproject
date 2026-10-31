@@ -7,6 +7,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const ReplayEngine = require('./replay-engine');
@@ -109,7 +110,11 @@ class LoopReplayRunner {
     const rawSlug = (this.workflowName || this.workflowId || 'workflow').toLowerCase();
     this.workflowSlug = rawSlug.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'workflow';
     this.dateStr = new Date().toISOString().split('T')[0];
-    this.workflowDownloadsBaseDir = path.resolve(process.cwd(), 'downloads', this.workflowSlug);
+    const safeBaseDownloads = options.baseDownloadsDir ||
+      (options.structuredDownloadsDir ? path.dirname(options.structuredDownloadsDir) : null) ||
+      (process.cwd() && process.cwd() !== '/' && process.cwd() !== '\\' ? path.resolve(process.cwd(), 'downloads') : path.join(os.homedir(), 'Downloads', 'ReFlow', 'downloads'));
+
+    this.workflowDownloadsBaseDir = path.resolve(safeBaseDownloads, this.workflowSlug);
     this._hasCustomStructuredDir = Boolean(options.structuredDownloadsDir);
     this.structuredDownloadsDir = options.structuredDownloadsDir ? path.resolve(options.structuredDownloadsDir) : path.resolve(this.workflowDownloadsBaseDir, this.dateStr);
 
@@ -125,6 +130,8 @@ class LoopReplayRunner {
       workflowId: this.workflowId,
       portalDomain: this.portalDomain,
       portalUrl: targetUrl,
+      baseDownloadsDir: safeBaseDownloads,
+      baseRunDir: options.baseRunDir || (options.structuredDownloadsDir ? path.join(path.dirname(options.structuredDownloadsDir), 'Run') : null),
       runTimestamp: options?.runTimestamp,
       startedAt: options?.startedAt
     });

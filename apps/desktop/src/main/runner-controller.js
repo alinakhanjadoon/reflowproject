@@ -116,7 +116,7 @@ class RunnerController {
       this.daemon = new RunnerDaemon({
         cloudClient,
         cdpPort: chromeSpawner.port,
-        targetFolder: config.targetFolder,
+        targetFolder: config.targetFolder || require('path').join(require('os').homedir(), 'Downloads', 'ReFlow'),
         pollIntervalMs: 3000,
         logger: {
           info: (...args) => console.log('[RunnerDaemon:INFO]', ...args),
