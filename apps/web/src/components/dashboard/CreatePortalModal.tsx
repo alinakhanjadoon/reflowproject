@@ -197,6 +197,7 @@ export function CreatePortalModal({
   const [recordedActions, setRecordedActions] = useState<CapturedAction[]>([]);
   const [actionCount, setActionCount] = useState<number>(0);
   const [capturedRecipe, setCapturedRecipe] = useState<WorkflowRecipe | null>(null);
+  const recordStartTimeRef = useRef<number>(0);
 
   // Synchronize activeTab when initialTab prop updates (deferred to avoid cascading render warning)
   useEffect(() => {
@@ -337,44 +338,82 @@ export function CreatePortalModal({
     };
   }, [isOpen, recordName, recordUrl]);
 
-  // Live polling of /record/status during active recording
+  // Live polling of /record/status and cloud workflows during active recording
   useEffect(() => {
     if (recordingPhase !== 'recording') return;
 
+    let isCancelled = false;
+
     const pollInterval = setInterval(async () => {
+      // 1. Check local desktop bridge (works on localhost or when private network access allowed)
       try {
         const res = await fetch('http://127.0.0.1:49152/record/status');
-        if (!res.ok) return;
+        if (res.ok && !isCancelled) {
+          const data = await res.json();
+          if (typeof data.actionCount === 'number') {
+            setActionCount(data.actionCount);
+          }
+          if (Array.isArray(data.actions)) {
+            setRecordedActions(data.actions);
+            setActionCount(data.actions.length);
+          }
 
-        const data = await res.json();
-        if (typeof data.actionCount === 'number') {
-          setActionCount(data.actionCount);
-        }
-        if (Array.isArray(data.actions)) {
-          setRecordedActions(data.actions);
-          setActionCount(data.actions.length);
-        }
+          if (data.syncedWorkflow) {
+            onWorkflowCreated(data.syncedWorkflow);
+            await resetAllState();
+            onClose();
+            return;
+          }
 
-        // If user finished in Chrome floating banner or bridge signaled completion
-        if (data.completedRecording) {
-          setCapturedRecipe(data.recipe || {
-            metadata: {
-              name: recordName || data.name || 'Recorded Workflow',
-              startUrl: recordUrl || data.url || 'https://vendor-portal.com',
-            },
-            actions: data.actions || [],
-          });
-          if (data.name && !recordName) setRecordName(data.name);
-          if (data.url && !recordUrl) setRecordUrl(data.url);
-          setRecordingPhase('preview');
+          // If user finished in Chrome floating banner or bridge signaled completion
+          if (data.completedRecording) {
+            setCapturedRecipe(data.recipe || {
+              metadata: {
+                name: recordName || data.name || 'Recorded Workflow',
+                startUrl: recordUrl || data.url || 'https://vendor-portal.com',
+              },
+              actions: data.actions || [],
+            });
+            if (data.name && !recordName) setRecordName(data.name);
+            if (data.url && !recordUrl) setRecordUrl(data.url);
+            setRecordingPhase('preview');
+            return;
+          }
         }
-      } catch (err) {
-        console.warn('Status poll warning:', err);
+      } catch {
+        // Local bridge blocked by HTTPS mixed content or unreachable
       }
-    }, 1000);
 
-    return () => clearInterval(pollInterval);
-  }, [recordingPhase, recordName, recordUrl]);
+      // 2. Poll cloud API: detect when Desktop app or Chrome synced the workflow directly to cloud
+      if (orgId && !isCancelled) {
+        try {
+          const cloudRes = await fetch(`/api/v1/workflows?org_id=${encodeURIComponent(orgId)}`, { cache: 'no-store' });
+          if (cloudRes.ok && !isCancelled) {
+            const cloudData = await cloudRes.json();
+            const wfs: Workflow[] = Array.isArray(cloudData.workflows) ? cloudData.workflows : [];
+            const newlySynced = wfs.find((w) => {
+              const createdAt = new Date(w.created_at).getTime();
+              return createdAt >= (recordStartTimeRef.current - 5000);
+            });
+
+            if (newlySynced && !isCancelled) {
+              onWorkflowCreated(newlySynced);
+              await resetAllState();
+              onClose();
+              return;
+            }
+          }
+        } catch {
+          // Cloud poll non-fatal
+        }
+      }
+    }, 1500);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(pollInterval);
+    };
+  }, [recordingPhase, recordName, recordUrl, orgId, onWorkflowCreated, onClose]);
 
   // Clean handleClose: reset state when dismissing
   const handleClose = useCallback(async () => {
@@ -578,7 +617,8 @@ export function CreatePortalModal({
         target_folder: canvasTargetFolder || '~/Documents/ReFlow/Invoices',
       };
 
-      const res = await fetch('/api/v1/workflows', {
+      const endpoint = orgId ? `/api/v1/workflows?org_id=${encodeURIComponent(orgId)}` : '/api/v1/workflows';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -716,7 +756,8 @@ export function CreatePortalModal({
       };
 
       // Try API route first
-      const res = await fetch('/api/v1/workflows', {
+      const endpoint = orgId ? `/api/v1/workflows?org_id=${encodeURIComponent(orgId)}` : '/api/v1/workflows';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -790,7 +831,8 @@ export function CreatePortalModal({
         target_folder: quickTargetFolder,
       };
 
-      const res = await fetch('/api/v1/workflows', {
+      const endpoint = orgId ? `/api/v1/workflows?org_id=${encodeURIComponent(orgId)}` : '/api/v1/workflows';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -860,6 +902,7 @@ export function CreatePortalModal({
       setRecordName(finalName);
     }
 
+    recordStartTimeRef.current = Date.now();
     setRecordingPhase('starting');
     let localStarted = false;
 
@@ -987,7 +1030,8 @@ export function CreatePortalModal({
     };
 
     try {
-      const res = await fetch('/api/v1/workflows', {
+      const endpoint = orgId ? `/api/v1/workflows?org_id=${encodeURIComponent(orgId)}` : '/api/v1/workflows';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

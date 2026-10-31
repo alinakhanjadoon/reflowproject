@@ -68,8 +68,8 @@ class DesktopNotifier {
     if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) return;
 
     const notif = new Notification({
-      title: `🎬 Workflow Captured — ${workflowName}`,
-      body: `Successfully recorded ${actionCount} user action(s). Recipe compiled and ready.`,
+      title: `🎬 Workflow Saved — ${workflowName}`,
+      body: `Successfully recorded ${actionCount} user action(s). Saved to cloud and ready on your dashboard.`,
       silent: false,
     });
 

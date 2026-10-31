@@ -158,13 +158,14 @@ export default function WorkflowsPage() {
     } catch {
       // Non-fatal telemetry refresh error
     }
-  }, []);
+  }, [orgId]);
 
   // Fetch workflows catalog
   const loadWorkflows = useCallback(async () => {
     setFetchError(null);
     try {
-      const wfRes = await fetch('/api/v1/workflows');
+      const url = orgId ? `/api/v1/workflows?org_id=${encodeURIComponent(orgId)}` : '/api/v1/workflows';
+      const wfRes = await fetch(url);
       if (!wfRes.ok) {
         const errJson = await wfRes.json().catch(() => ({}));
         throw new Error(errJson.error || 'Failed to fetch workflows');
@@ -178,7 +179,7 @@ export default function WorkflowsPage() {
       setIsLoading(false);
       setIsRefreshingLocal(false);
     }
-  }, []);
+  }, [orgId]);
 
   // Fetch workflows and telemetry together for initial mount or manual refresh
   const loadData = useCallback(async () => {
@@ -221,13 +222,25 @@ export default function WorkflowsPage() {
     };
   }, [loadData]);
 
-  // Real-time Supabase listener on active execution runs - only reloads runs telemetry
+  // Real-time Supabase listener on workflows and active execution runs
   useEffect(() => {
     if (!orgId) return;
 
     const supabase = createClient();
     const channel = supabase
-      .channel('wf_workflows_active_runs')
+      .channel('wf_workflows_realtime_sync')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'wf_workflows',
+          filter: `org_id=eq.${orgId}`,
+        },
+        () => {
+          void loadWorkflows();
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -245,7 +258,17 @@ export default function WorkflowsPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [orgId, loadRuns]);
+  }, [orgId, loadWorkflows, loadRuns]);
+
+  // Auto-refresh when tab gains focus (e.g. returning after recording in Chrome)
+  useEffect(() => {
+    const handleFocus = () => {
+      void loadWorkflows();
+      void loadRuns();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadWorkflows, loadRuns]);
 
   const handleManualRefresh = async () => {
     setIsRefreshingLocal(true);

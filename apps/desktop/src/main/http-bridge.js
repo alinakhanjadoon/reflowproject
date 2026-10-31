@@ -72,6 +72,7 @@ class HttpBridge {
       completedRecording: this.completedRecording,
       sessionMeta: this.sessionMeta,
       recipe: this.lastRecipe,
+      syncedWorkflow: this.lastSyncedWorkflow || null,
       port: this.port
     };
   }
@@ -589,6 +590,11 @@ class HttpBridge {
             this.sessionMeta.completedAt = new Date().toISOString();
           }
 
+          if (this.lastRecipe && !this.lastRecipe._syncedToCloud) {
+            this.lastRecipe._syncedToCloud = true;
+            await this.syncWorkflowToCloud(this.lastRecipe);
+          }
+
           try {
             notifier.notifyRecordingSaved(this.sessionMeta?.name || 'Recorded Workflow', this.actions.length);
           } catch {}
@@ -605,11 +611,79 @@ class HttpBridge {
     return this._stoppingPromise;
   }
 
+  async syncWorkflowToCloud(recipe) {
+    if (!recipe) return null;
+    const config = configManager.get();
+    const cloudUrl = config.cloudUrl || 'https://reflowproject-web.vercel.app';
+    if (!config.runnerToken) {
+      console.warn('[HTTPBridge] Cannot sync workflow to cloud: runnerToken or cloudUrl not configured');
+      return null;
+    }
+
+    try {
+      const rawActions = Array.isArray(recipe.actions) && recipe.actions.length > 0
+        ? recipe.actions
+        : (Array.isArray(this.actions) && this.actions.length > 0 ? this.actions : []);
+      const workflowName = recipe.metadata?.name || this.sessionMeta?.name || `Recorded Workflow - ${new Date().toLocaleDateString()}`;
+      const portalUrl = recipe.metadata?.startUrl || this.sessionMeta?.url || (rawActions.find(a => a && a.url)?.url) || 'https://google.com';
+
+      const actions = rawActions.length > 0 ? rawActions : [
+        { type: 'navigate', url: portalUrl, description: 'Open vendor portal URL' }
+      ];
+
+      const payload = {
+        name: workflowName,
+        portal_url: portalUrl,
+        workflow_definition: {
+          ...recipe,
+          steps: actions,
+          schedule: 'manual',
+          target_folder: config.targetFolder || '',
+          upload_to_cloud: true,
+        },
+        filter_rules: recipe.filter_rules || {},
+        upload_to_cloud: true,
+        target_folder: config.targetFolder || '',
+      };
+
+      const endpoint = `${cloudUrl.replace(/\/$/, '')}/api/v1/workflows`;
+      console.log(`[HTTPBridge] Syncing recorded workflow "${workflowName}" (${actions.length} actions) to ${endpoint}...`);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.runnerToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log(`[HTTPBridge] Successfully synced workflow to cloud! ID: ${data.workflow?.id}`);
+        this.lastSyncedWorkflow = data.workflow;
+        return data.workflow;
+      } else {
+        const errText = await res.text();
+        console.warn(`[HTTPBridge] Failed to sync workflow to cloud (${res.status}): ${errText}`);
+        return null;
+      }
+    } catch (err) {
+      console.warn('[HTTPBridge] Network error syncing workflow to cloud:', err.message);
+      return null;
+    }
+  }
+
   async stopRecording() {
     if (this._stoppingPromise) {
       await this._stoppingPromise;
     } else if (this.activeRecorder && (this.activeRecorder.isRecording || this.isRecording)) {
       await this._handleChromeSave();
+    }
+
+    if (this.lastRecipe && !this.lastRecipe._syncedToCloud) {
+      this.lastRecipe._syncedToCloud = true;
+      await this.syncWorkflowToCloud(this.lastRecipe);
     }
 
     this.isRecording = false;
