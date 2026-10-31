@@ -1,8 +1,8 @@
 {
-  "name": "reflow-worker",
-  "productName": "ReFlow Worker",
+  "name": "reflow-desktop",
+  "productName": "ReFlow Desktop",
   "version": "1.0.0",
-  "description": "ReFlow Desktop Local Worker & Chrome Automation Engine",
+  "description": "ReFlow Desktop Local Automation Runner & Chrome Engine",
   "main": "src/main/main.js",
   "author": "ReFlow",
   "private": true,
@@ -18,8 +18,8 @@
     "test": "node test/test-http-bridge.js"
   },
   "build": {
-    "appId": "com.reflow.worker",
-    "productName": "ReFlow Worker",
+    "appId": "com.reflow.desktop",
+    "productName": "ReFlow Desktop",
     "electronVersion": "33.2.0",
     "directories": {
       "output": "dist"
@@ -41,7 +41,7 @@
     ],
     "protocols": [
       {
-        "name": "ReFlow Worker Protocol",
+        "name": "ReFlow Desktop Protocol",
         "schemes": [
           "reflow"
         ]
@@ -70,11 +70,11 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "ReFlow Worker",
-      "artifactName": "ReFlow-Worker-Setup-${version}.${ext}"
+      "shortcutName": "ReFlow Desktop",
+      "artifactName": "ReFlow-Desktop-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "ReFlow-Worker-Portable-${version}.${ext}"
+      "artifactName": "ReFlow-Desktop-Portable-${version}.${ext}"
     },
     "mac": {
       "icon": "assets/icon.icns",
@@ -96,11 +96,11 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "darkModeSupport": true,
-      "artifactName": "ReFlow-Worker-${version}-mac-x64.${ext}"
+      "artifactName": "ReFlow-Desktop-${version}-mac-x64.${ext}"
     },
     "dmg": {
       "title": "${productName} ${version} (Intel x64)",
-      "artifactName": "ReFlow-Worker-Setup-${version}-mac-x64.${ext}",
+      "artifactName": "ReFlow-Desktop-Setup-${version}-mac-x64.${ext}",
       "contents": [
         {
           "x": 130,

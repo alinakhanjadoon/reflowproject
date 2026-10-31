@@ -56,17 +56,21 @@ export async function GET(request: NextRequest) {
   const isMac = rawOs === 'mac' || rawOs === 'darwin' || rawType === 'dmg' || rawType === 'mac';
   const isPortable = rawType === 'portable' || rawType === 'zip';
 
-  let candidateNames = ['ReFlow-Worker-Setup-1.0.0.exe'];
+  let candidateNames = ['ReFlow-Desktop-Setup-1.0.0.exe', 'ReFlow-Worker-Setup-1.0.0.exe'];
 
   if (isMac) {
     candidateNames = [
+      'ReFlow-Desktop-Setup-1.0.0-mac-x64.dmg',
+      'ReFlow-Desktop-1.0.0-mac-x64.dmg',
+      'ReFlow-Desktop-1.0.0.dmg',
+      'ReFlow-Desktop-1.0.0-mac-x64.zip',
       'ReFlow-Worker-Setup-1.0.0-mac-x64.dmg',
       'ReFlow-Worker-1.0.0-mac-x64.dmg',
       'ReFlow-Worker-1.0.0.dmg',
       'ReFlow-Worker-1.0.0-mac-x64.zip'
     ];
   } else if (isPortable) {
-    candidateNames = ['ReFlow-Worker-Portable-1.0.0.exe'];
+    candidateNames = ['ReFlow-Desktop-Portable-1.0.0.exe', 'ReFlow-Worker-Portable-1.0.0.exe'];
   }
 
   const binaryPath = findBinaryPath(candidateNames);

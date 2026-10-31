@@ -123,7 +123,7 @@ function createWindow() {
 
 function setupApplicationMenu() {
   if (process.platform === 'darwin') {
-    const appName = app.name || 'ReFlow Worker';
+    const appName = app.name || 'ReFlow Desktop';
     const template = [
       {
         label: appName,
@@ -257,7 +257,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit ReFlow Worker',
+      label: 'Quit ReFlow Desktop',
       click: () => {
         isQuitting = true;
         app.quit();
