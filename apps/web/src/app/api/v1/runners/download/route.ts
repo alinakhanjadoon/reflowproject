@@ -105,9 +105,7 @@ export async function GET(request: NextRequest) {
     : process.env.DESKTOP_WIN_DOWNLOAD_URL;
 
   const repoBase = process.env.NEXT_PUBLIC_GITHUB_REPO || 'https://github.com/alinakhanjadoon/reflowproject';
-  const defaultGitHubReleaseUrl = isMac
-    ? `${repoBase}/releases/tag/Desktop-app`
-    : `${repoBase}/releases/download/Desktop-app/${fileName}`;
+  const defaultGitHubReleaseUrl = `${repoBase}/releases/download/Desktop-app/${fileName}`;
   const redirectTarget = customRemoteUrl || defaultGitHubReleaseUrl;
 
   return NextResponse.redirect(redirectTarget, 302);
