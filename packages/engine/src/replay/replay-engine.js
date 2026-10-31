@@ -23,6 +23,7 @@ const logger = require('../utils/logger');
 const { detectLoginSequence, isSessionAuthenticated } = require('../shared/auth-detector');
 const InterruptionHandler = require('./interruption-handler');
 const TabManager = require('./tab-manager');
+const { getSafeStoragePath, safeMkdir } = require('../utils/storage-helper');
 const ActionDispatcher = require('./action-dispatcher');
 
 /**
@@ -68,12 +69,13 @@ class ReplayEngine extends EventEmitter {
     this._guardScriptIds = new Map();
 
     // Universal Interruption Handler & Intelligent Tab Manager
+    this.downloadsDir = options.downloadsDir || getSafeStoragePath('downloads');
     this.interruptionHandler = new InterruptionHandler({
       autoAcceptDialogs: options.autoAcceptDialogs !== false
     });
     this.tabManager = new TabManager({
       interruptionHandler: this.interruptionHandler,
-      downloadsDir: path.resolve(process.cwd(), 'downloads')
+      downloadsDir: this.downloadsDir
     });
     this.extractedRowFields = {};
   }
@@ -322,10 +324,10 @@ class ReplayEngine extends EventEmitter {
     this.page = page;
     await this._applyStealthEvasion();
 
-    // Enable automated background file downloads to ./downloads
+    // Enable automated background file downloads to safe downloads directory
     try {
-      const downloadDir = path.resolve(process.cwd(), 'downloads');
-      if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
+      const downloadDir = this.downloadsDir || getSafeStoragePath('downloads');
+      safeMkdir(downloadDir);
       if (this.browser) {
         try {
           const browserTarget = (typeof this.browser.targets === 'function' ? this.browser.targets().find(t => t.type() === 'browser') : null) || (typeof this.browser.target === 'function' ? this.browser.target() : null);

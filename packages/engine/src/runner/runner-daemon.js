@@ -375,11 +375,13 @@ class RunnerDaemon {
       const workflowTargetFolder = def.target_folder || workflow?.target_folder;
       let runTargetDir = resolvePortalStorageDir(this.targetFolder, sanitizedPortalName);
 
-      if (workflowTargetFolder) {
+      if (workflowTargetFolder && typeof workflowTargetFolder === 'string' && workflowTargetFolder.trim().length > 0) {
         try {
-          const customBase = path.isAbsolute(workflowTargetFolder)
-            ? workflowTargetFolder
-            : path.resolve(process.cwd(), workflowTargetFolder);
+          const { getSafeStorageBase } = require('../utils/storage-helper');
+          const trimmed = workflowTargetFolder.trim();
+          const customBase = path.isAbsolute(trimmed)
+            ? trimmed
+            : path.resolve(getSafeStorageBase(), trimmed);
 
           runTargetDir = path.basename(customBase).toLowerCase() === sanitizedPortalName.toLowerCase()
             ? customBase
@@ -428,6 +430,7 @@ class RunnerDaemon {
         structuredDownloadsDir: runTargetDir,
         baseDownloadsDir: path.dirname(runTargetDir),
         baseRunDir: path.join(path.dirname(runTargetDir), 'Run'),
+        baseRecordingsDir: path.join(path.dirname(runTargetDir), 'recordings'),
         itemFilter: itemFilter,
         rowFilter: rowFilter,
         loopLimit: loopLimit,

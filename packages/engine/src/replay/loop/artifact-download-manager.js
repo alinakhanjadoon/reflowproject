@@ -11,6 +11,7 @@ const os = require('os');
 const DownloadManager = require('../download-manager');
 const DocumentDataExtractor = require('../../shared/document-data-extractor');
 const logger = require('../../utils/logger');
+const { getSafeStoragePath, safeMkdir } = require('../../utils/storage-helper');
 
 class ArtifactDownloadManager {
   constructor(options = {}) {
@@ -22,15 +23,19 @@ class ArtifactDownloadManager {
     this.forceRedownload = opts.forceRedownload === true;
     this._downloadedRecords = [];
 
-    this.runsDir = opts.runsDir || path.resolve(process.cwd(), 'recordings', 'runs', this.runId);
-    this.downloadsDir = path.join(this.runsDir, 'downloads');
+    const safeBaseRecordings = opts.baseRecordingsDir || (
+      opts.structuredDownloadsDir ? path.join(path.dirname(opts.structuredDownloadsDir), 'recordings') : null
+    ) || getSafeStoragePath('recordings');
+
+    this.runsDir = opts.runsDir || path.join(safeBaseRecordings, 'runs', this.runId);
+    this.downloadsDir = opts.downloadsDir || path.join(this.runsDir, 'downloads');
 
     // Structured downloads hierarchy: downloads/<workflow-slug>/<YYYY-MM-DD>/
     const rawSlug = (this.workflowName || this.workflowId || 'workflow').toLowerCase();
     this.workflowSlug = rawSlug.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'workflow';
     this.dateStr = new Date().toISOString().split('T')[0];
-    this.workflowDownloadsBaseDir = path.resolve(process.cwd(), 'downloads', this.workflowSlug);
-    this.structuredDownloadsDir = path.resolve(this.workflowDownloadsBaseDir, this.dateStr);
+    this.workflowDownloadsBaseDir = opts.baseDownloadsDir || getSafeStoragePath('downloads', this.workflowSlug);
+    this.structuredDownloadsDir = opts.structuredDownloadsDir || path.resolve(this.workflowDownloadsBaseDir, this.dateStr);
 
     // Primary Run/ hierarchy: Run/<YYYY-MM-DD_HH-mm-ss>/<portalDomain>/<Category>/
     const targetUrl = opts.targetUrl || opts.portalUrl || '';
@@ -672,9 +677,9 @@ class ArtifactDownloadManager {
     }
     const csvContent = '\uFEFF' + csvLines.join('\r\n');
 
-    const targetDir = this.structuredDownloadsDir || this.downloadsDir || path.resolve(process.cwd(), 'downloads');
+    const targetDir = this.structuredDownloadsDir || this.downloadsDir || getSafeStoragePath('downloads');
     if (!fs.existsSync(targetDir)) {
-      try { fs.mkdirSync(targetDir, { recursive: true }); } catch {}
+      try { safeMkdir(targetDir); } catch {}
     }
 
     const dateTag = this.dateStr || new Date().toISOString().slice(0, 10);

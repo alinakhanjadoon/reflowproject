@@ -16,6 +16,7 @@ const ItemDiscovery = require('../shared/item-discovery');
 const ActionGeneralizer = require('../shared/action-generalizer');
 const logger = require('../utils/logger');
 const { resolveTargetUrl, extractWorkflowStartUrl } = require('../utils/url-helper');
+const { getSafeStoragePath, getSafeStorageBase, safeMkdir } = require('../utils/storage-helper');
 const {
   normalizeItemFilter,
   validateItemFilter,
@@ -44,9 +45,13 @@ class LoopReplayRunner {
     this.itemMode = ['new', 'old', 'all'].includes(options.itemMode) ? options.itemMode : 'new';
     this.maxItems = Number.isInteger(options.maxItems) && options.maxItems > 0 ? options.maxItems : null;
 
-    this.runsDir = path.resolve(process.cwd(), 'recordings', 'runs', this.runId);
-    this.downloadsDir = path.join(this.runsDir, 'downloads');
-    this.replayEngine = new ReplayEngine({ cdpPort: this.cdpPort });
+    const safeBaseRecordings = options.baseRecordingsDir || (
+      options.structuredDownloadsDir ? path.join(path.dirname(options.structuredDownloadsDir), 'recordings') : null
+    ) || getSafeStoragePath('recordings');
+
+    this.runsDir = options.runsDir || path.join(safeBaseRecordings, 'runs', this.runId);
+    this.downloadsDir = options.downloadsDir || path.join(this.runsDir, 'downloads');
+    this.replayEngine = new ReplayEngine({ cdpPort: this.cdpPort, downloadsDir: this.downloadsDir });
     this.maxItemRetries = Number.isInteger(options.maxItemRetries) ? Math.max(0, options.maxItemRetries) : 1;
     this.resumeFromCheckpoint = options.resumeFromCheckpoint === true;
     this.isAborted = false;
@@ -112,7 +117,7 @@ class LoopReplayRunner {
     this.dateStr = new Date().toISOString().split('T')[0];
     const safeBaseDownloads = options.baseDownloadsDir ||
       (options.structuredDownloadsDir ? path.dirname(options.structuredDownloadsDir) : null) ||
-      (process.cwd() && process.cwd() !== '/' && process.cwd() !== '\\' ? path.resolve(process.cwd(), 'downloads') : path.join(os.homedir(), 'Downloads', 'ReFlow', 'downloads'));
+      getSafeStorageBase('downloads');
 
     this.workflowDownloadsBaseDir = path.resolve(safeBaseDownloads, this.workflowSlug);
     this._hasCustomStructuredDir = Boolean(options.structuredDownloadsDir);
@@ -147,6 +152,10 @@ class LoopReplayRunner {
       userId: options.userId,
       forceRedownload: this.forceRedownload,
       runsDir: this.runsDir,
+      downloadsDir: this.downloadsDir,
+      baseDownloadsDir: safeBaseDownloads,
+      baseRecordingsDir: safeBaseRecordings,
+      structuredDownloadsDir: this.structuredDownloadsDir,
       targetUrl: targetUrl,
       portalDomain: this.portalDomain,
       runTimestamp: this.runTimestamp,
@@ -162,6 +171,7 @@ class LoopReplayRunner {
       workflowId: this.workflowId,
       workflowName: this.workflowName,
       runsDir: this.runsDir,
+      baseRecordingsDir: safeBaseRecordings,
       resumeFromCheckpoint: this.resumeFromCheckpoint,
       itemMode: this.itemMode,
       maxItems: this.maxItems,
@@ -312,12 +322,26 @@ class LoopReplayRunner {
   }
   initDirectories() {
     this._syncSubManagers();
-    if (!fs.existsSync(this.downloadsDir)) {
-      fs.mkdirSync(this.downloadsDir, { recursive: true });
+    try {
+      if (!fs.existsSync(this.downloadsDir)) {
+        fs.mkdirSync(this.downloadsDir, { recursive: true });
+      }
+    } catch (err) {
+      logger.warn(`Could not create downloadsDir ${this.downloadsDir}: ${err.message}. Falling back.`);
+      this.downloadsDir = path.join(os.tmpdir(), 'ReFlow', 'downloads', this.runId);
+      try { fs.mkdirSync(this.downloadsDir, { recursive: true }); } catch {}
     }
-    if (!fs.existsSync(this.structuredDownloadsDir)) {
-      fs.mkdirSync(this.structuredDownloadsDir, { recursive: true });
+
+    try {
+      if (!fs.existsSync(this.structuredDownloadsDir)) {
+        fs.mkdirSync(this.structuredDownloadsDir, { recursive: true });
+      }
+    } catch (err) {
+      logger.warn(`Could not create structuredDownloadsDir ${this.structuredDownloadsDir}: ${err.message}. Falling back.`);
+      this.structuredDownloadsDir = path.join(os.tmpdir(), 'ReFlow', 'structured', this.runId);
+      try { fs.mkdirSync(this.structuredDownloadsDir, { recursive: true }); } catch {}
     }
+
     if (this.downloadManager) {
       this.downloadManager._initDirectory();
     }
@@ -810,7 +834,7 @@ class LoopReplayRunner {
       if (!this.workflowName || this.workflowName === 'workflow') this.workflowName = workflow.name || workflow.metadata?.name || workflow.id || 'workflow';
       const rawSlug = (this.workflowName || this.workflowId || 'workflow').toLowerCase();
       this.workflowSlug = rawSlug.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'workflow';
-      this.workflowDownloadsBaseDir = path.resolve(process.cwd(), 'downloads', this.workflowSlug);
+      this.workflowDownloadsBaseDir = getSafeStoragePath('downloads', this.workflowSlug);
       if (!this._hasCustomStructuredDir) {
         this.structuredDownloadsDir = path.resolve(this.workflowDownloadsBaseDir, this.dateStr);
       }

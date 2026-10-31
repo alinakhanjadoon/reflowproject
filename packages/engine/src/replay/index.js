@@ -45,7 +45,8 @@ function parseArgs() {
 
   // If no file argument given, check recordings/ folder for newest file
   if (!options.file) {
-    const recordingsDir = path.resolve(process.cwd(), 'recordings');
+    const { getSafeStoragePath } = require('../utils/storage-helper');
+    const recordingsDir = getSafeStoragePath('recordings');
     if (fs.existsSync(recordingsDir)) {
       const files = fs.readdirSync(recordingsDir)
         .filter(f => f.endsWith('.json'))

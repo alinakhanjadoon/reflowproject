@@ -17,19 +17,7 @@ const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const logger = require('../utils/logger');
-
-function getSafeStorageBase(sub = 'downloads') {
-  const defaultHomeDir = path.join(os.homedir(), 'Downloads', 'ReFlow', sub);
-  try {
-    const cwd = process.cwd();
-    if (!cwd || cwd === '/' || cwd === '\\' || /^[A-Za-z]:\\?$/.test(cwd)) {
-      return defaultHomeDir;
-    }
-    return path.resolve(cwd, sub);
-  } catch {
-    return defaultHomeDir;
-  }
-}
+const { getSafeStorageBase } = require('../utils/storage-helper');
 
 function formatRunTimestamp(date = new Date()) {
   if (typeof date === 'string') {

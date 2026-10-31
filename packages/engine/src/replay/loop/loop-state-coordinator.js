@@ -6,16 +6,19 @@
 
 const fs = require('fs');
 const path = require('path');
-const logger = require('../../utils/logger');
 const { validateItemFilter } = require('../../shared/item-filter');
 const { ConditionEvaluator } = require('../../shared/condition-evaluator');
+const { getSafeStoragePath } = require('../../utils/storage-helper');
 
 class LoopStateCoordinator {
   constructor(options = {}) {
     this.runId = options.runId || `run_${Date.now()}`;
     this.workflowId = options.workflowId || null;
     this.workflowName = options.workflowName || 'workflow';
-    this.runsDir = options.runsDir || path.resolve(process.cwd(), 'recordings', 'runs', this.runId);
+    const safeBaseRecordings = options.baseRecordingsDir || (
+      options.structuredDownloadsDir ? path.join(path.dirname(options.structuredDownloadsDir), 'recordings') : null
+    ) || getSafeStoragePath('recordings');
+    this.runsDir = options.runsDir || path.join(safeBaseRecordings, 'runs', this.runId);
     this.resumeFromCheckpoint = options.resumeFromCheckpoint === true;
     this.itemMode = ['new', 'old', 'all'].includes(options.itemMode) ? options.itemMode : 'new';
     this.maxItems = Number.isInteger(options.maxItems) && options.maxItems > 0 ? options.maxItems : null;

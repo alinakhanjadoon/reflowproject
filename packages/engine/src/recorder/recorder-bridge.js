@@ -11,6 +11,7 @@ const { connectToBrowser } = require('../utils/cdp-connector');
 const SelectorResolver = require('../shared/selector-resolver');
 const logger = require('../utils/logger');
 const { isInternalBrowserUrl, isDashboardUrl, extractWorkflowStartUrl } = require('../utils/url-helper');
+const { getSafeStoragePath, safeMkdir } = require('../utils/storage-helper');
 
 /**
  * Recursively collect all frames within a page or frame hierarchy at any nesting depth
@@ -42,7 +43,7 @@ class RecorderBridge {
   constructor(options = {}) {
     this.name = options.name || `recording-${Date.now()}`;
     this.browserURL = options.browserURL || 'http://localhost:9222';
-    this.outputDir = options.outputDir || path.resolve(process.cwd(), 'recordings');
+    this.outputDir = options.outputDir || getSafeStoragePath('recordings');
     this.browser = null;
     this.page = null;
     this.actions = [];
@@ -960,9 +961,9 @@ class RecorderBridge {
       actions: this.actions
     };
 
-    // Ensure output directory exists
+    // Ensure output directory exists safely
     if (!fs.existsSync(this.outputDir)) {
-      fs.mkdirSync(this.outputDir, { recursive: true });
+      try { safeMkdir(this.outputDir); } catch {}
     }
 
     const sanitizedName = this.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
