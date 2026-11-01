@@ -666,8 +666,12 @@ class ReplayEngine extends EventEmitter {
         await new Promise(r => setTimeout(r, preDelay));
       }
 
-      if (action.type === 'NAVIGATE' && action.url) {
-        const navUrl = resolveTargetUrl(action.url) || action.url;
+      const rawActionType = action.type || action.action || '';
+      const actionType = String(rawActionType).toUpperCase();
+
+      if (actionType === 'NAVIGATE' && (action.url || action.targetUrl || action.value)) {
+        const targetUrl = action.url || action.targetUrl || action.value;
+        const navUrl = resolveTargetUrl(targetUrl) || targetUrl;
         await this.page.goto(navUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await this._applyStealthEvasion();
         await new Promise(r => setTimeout(r, 500));
@@ -688,7 +692,7 @@ class ReplayEngine extends EventEmitter {
         return { success: true, type: 'CLICK', skipped: true };
       }
 
-      if (action.type === 'SCROLL') {
+      if (actionType === 'SCROLL') {
         let elementHandle = null;
         if (!action.isWindow && action.target && Array.isArray(action.target.candidates) && action.target.candidates.length > 0) {
           try {

@@ -73,7 +73,7 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
   );
   if (roleIdx >= 0) return roleIdx;
 
-  // 2. Step targeting table rows or data items
+  // 2. Step targeting table rows, dropdown options, list items, or collection items
   const rowIdx = steps.findIndex((s: any) => {
     if (!s) return false;
     const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
@@ -85,8 +85,15 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
     return (
       tag === 'TR' ||
       tag === 'TD' ||
+      tag === 'MAT-OPTION' ||
+      tag === 'OPTION' ||
+      tag === 'LI' ||
       role === 'row' ||
       role === 'gridcell' ||
+      role === 'option' ||
+      role === 'listitem' ||
+      selectors.includes('mat-option') ||
+      selectors.includes('option') ||
       selectors.includes('tr') ||
       selectors.includes('tbody') ||
       selectors.includes('data-row') ||
@@ -98,7 +105,15 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
   });
   if (rowIdx >= 0) return rowIdx;
 
-  // 3. Fallback to step #2 (index 1 if length > 1, else index 0)
+  // 3. Fallback: find the first non-login action that performs a business operation
+  const nonLoginIdx = steps.findIndex((s: any, idx: number) => {
+    if (idx === 0) return false;
+    const name = String(s.name || s.elementName || '').toLowerCase();
+    const type = String(s.type || s.action || '').toUpperCase();
+    return type !== 'NAVIGATE' && !/user|password|login|auth|submit/i.test(name);
+  });
+  if (nonLoginIdx >= 0) return nonLoginIdx;
+
   if (steps.length > 1) return 1;
   return 0;
 }

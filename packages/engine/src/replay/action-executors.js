@@ -1095,7 +1095,8 @@ async function executeExtractText(elementHandle, action, page, context = {}) {
  * Dispatcher to map action types to executor functions
  */
 async function dispatchAction(elementHandle, action, options = {}) {
-  switch (action.type) {
+  const type = String(action.type || action.action || '').toUpperCase();
+  switch (type) {
     case 'CLICK':
       return executeClick(elementHandle, action, options);
     case 'DOUBLE_CLICK':
@@ -1115,10 +1116,17 @@ async function dispatchAction(elementHandle, action, options = {}) {
     case 'EXTRACT_TEXT':
     case 'CAPTURE_FIELD':
       return executeExtractText(elementHandle, action, options.page, options);
+    case 'NAVIGATE':
+      if (options.page && (action.url || action.targetUrl || action.value)) {
+        const navUrl = action.url || action.targetUrl || action.value;
+        await options.page.goto(navUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        return { success: true, type: 'NAVIGATE' };
+      }
+      return { success: true, type: 'NAVIGATE' };
     default:
-      throw new ActionExecutionError(`Unsupported action type: ${action.type}`, {
+      throw new ActionExecutionError(`Unsupported action type: ${action.type || action.action}`, {
         actionIndex: action.index,
-        actionType: action.type
+        actionType: action.type || action.action
       });
   }
 }

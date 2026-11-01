@@ -352,6 +352,9 @@ class RunnerDaemon {
         def.maxItems ??
         (run.total_items_discovered > 0 ? run.total_items_discovered : null);
 
+      const { detectLoginSequence } = require('../shared/auth-detector');
+      const loginSeq = detectLoginSequence(steps);
+
       let loopStepIndex = run.loopStepIndex ??
         run.loop_step_index ??
         def.loopStepIndex ??
@@ -359,10 +362,15 @@ class RunnerDaemon {
         workflow?.loopStepIndex ??
         null;
 
-      if (loopStepIndex === null && isLoop) {
-        if (candidateStepIdx >= 0) {
+      // Self-heal: If loopStepIndex points into the initial login sequence,
+      // or if not set, prefer the detected collection candidate step
+      if (candidateStepIdx >= 0) {
+        if (loopStepIndex === null || (loginSeq.hasLoginSequence && loopStepIndex <= loginSeq.endIndex)) {
+          this.logger.info(`[RunnerDaemon] Adjusted loopStepIndex from ${loopStepIndex} to detected collection anchor #${candidateStepIdx + 1}`);
           loopStepIndex = candidateStepIdx;
-        } else if (steps.length > 1) {
+        }
+      } else if (loopStepIndex === null && isLoop) {
+        if (steps.length > 1) {
           loopStepIndex = 1;
         } else {
           loopStepIndex = 0;
