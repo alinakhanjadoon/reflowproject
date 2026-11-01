@@ -381,6 +381,8 @@ class ChromeSpawner {
       '--no-default-browser-check',
       '--disable-background-networking',
       '--disable-sync',
+      '--disable-component-update',
+      '--disable-default-apps',
     ];
 
     if (mode === 'headless') {
@@ -395,9 +397,9 @@ class ChromeSpawner {
     this.spawnedProcess.unref();
     this._writeOwnershipMarker(this.spawnedProcess.pid, mode);
 
-    // Poll until Chrome CDP responds (up to 8 seconds)
+    // Poll until Chrome CDP responds (up to 25 seconds for reliable cold starts)
     const startTime = Date.now();
-    while (Date.now() - startTime < 8000) {
+    while (Date.now() - startTime < 25000) {
       await new Promise((r) => setTimeout(r, 400));
       const check = await this.isPortOpen();
       if (check.open) {
@@ -411,7 +413,7 @@ class ChromeSpawner {
     }
 
     this.stopSpawned();
-    throw new Error(`Chrome started but CDP failed to respond on port ${this.port} within 8 seconds.`);
+    throw new Error(`Chrome started but CDP failed to respond on port ${this.port} within 25 seconds.`);
   }
 
   /**

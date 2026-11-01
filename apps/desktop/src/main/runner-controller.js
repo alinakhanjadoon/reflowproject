@@ -160,6 +160,19 @@ class RunnerController {
           }
           return result;
         } catch (err) {
+          try {
+            await cloudClient.updateRunStatus(run.id, 'failed', {
+              error_summary: err.message || 'Run failed during browser initialization',
+              completed_at: new Date().toISOString(),
+            });
+          } catch (cloudErr) {
+            console.warn('[RunnerController] Could not update failed run status in cloud:', cloudErr.message);
+          }
+
+          if (this.daemon) {
+            this.daemon.activeRun = null;
+          }
+
           const failedRun = {
             id: run.id,
             workflowName: 'Portal Automation',
