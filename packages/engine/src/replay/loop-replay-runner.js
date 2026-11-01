@@ -1051,6 +1051,20 @@ class LoopReplayRunner {
             logger.info(`[Loop Runner] Skipping setup login step #${i + 1} (${step.name || step.elementName || 'Login step'}) - session already authenticated.`);
             continue;
           }
+
+          // Natural pacing delay: wait if the user waited during recording (e.g. for page or grid to load)
+          if (i > 0 && step.timeDeltaMs && step.timeDeltaMs > 0) {
+            const paceDelay = Math.min(step.timeDeltaMs, 15000);
+            if (paceDelay > 600) {
+              logger.info(`[Loop Runner] Pacing setup step #${i + 1}: waiting ${paceDelay}ms for page/state to settle...`);
+              const end = Date.now() + paceDelay;
+              while (Date.now() < end) {
+                if (this.isAborted) break;
+                await new Promise(r => setTimeout(r, 100));
+              }
+            }
+          }
+
           await this.replayEngine.executeAction(step, i);
         }
 
