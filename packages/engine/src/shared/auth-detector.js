@@ -11,44 +11,56 @@
  * @param {object} action - Recorded action object
  * @returns {boolean}
  */
+/**
+ * Checks if a single action appears to be part of a login/authentication flow
+ * @param {object} action - Recorded action object
+ * @returns {boolean}
+ */
 function isLoginAction(action) {
   if (!action) return false;
 
-  const type = (action.type || '').toUpperCase();
+  const type = (action.type || action.action || '').toUpperCase();
   const name = String(action.name || action.elementName || '').toLowerCase();
   const target = action.target || {};
   const fingerprint = target.fingerprint || action.fingerprint || {};
   const candidates = Array.isArray(target.candidates) ? target.candidates : [];
 
   // 1. Password input action
-  if (type === 'TYPE') {
+  if (type === 'TYPE' || type === 'CLICK') {
     if (action.meta?.isPassword || fingerprint.isPassword) return true;
     if (fingerprint.type === 'password') return true;
-    if (candidates.some(c => c.value && /password|pwd/i.test(c.value))) return true;
+    if (/password|pwd/i.test(name)) return true;
+    if (candidates.some(c => c.value && /password/i.test(c.value))) return true;
   }
 
   // 2. Username / Email input action (click or type)
   if (type === 'TYPE' || type === 'CLICK') {
-    const isUserField = /user(name)?|email|login|user_id|userid/i.test(name) ||
-      /user(name)?|email|login|user_id|userid/i.test(fingerprint.name || '') ||
-      /user(name)?|email|login|user_id|userid/i.test(fingerprint.placeholder || '') ||
-      /user(name)?|email|login|user_id|userid/i.test(fingerprint.id || '');
+    const isUserField = /user(name)?|email|user_id|userid/i.test(name) ||
+      /user(name)?|email|user_id|userid/i.test(fingerprint.name || '') ||
+      /user(name)?|email|user_id|userid/i.test(fingerprint.placeholder || '') ||
+      /user(name)?|email|user_id|userid/i.test(fingerprint.id || '');
     if (isUserField) return true;
     if (candidates.some(c => c.value && /(username|user_name|user-name|email|login_id)/i.test(c.value))) return true;
   }
 
   // 3. Login / Sign In / Submit button click
   if (type === 'CLICK') {
-    const isLoginButton = /(log ?in|sign ?in|submit|continue|auth)/i.test(name) ||
-      /(log ?in|sign ?in|submit|continue|auth)/i.test(fingerprint.text || '') ||
-      /(log ?in|sign ?in|submit|continue|auth)/i.test(fingerprint.ariaLabel || '') ||
-      /(log ?in|sign ?in|submit|continue|auth)/i.test(fingerprint.id || '');
-    if (isLoginButton) return true;
-    if (candidates.some(c => c.value && /(log ?in|sign ?in|btn-login|login-button|signin)/i.test(c.value))) return true;
+    const isButton = fingerprint.tagName === 'button' ||
+      fingerprint.role === 'button' ||
+      fingerprint.type === 'submit' ||
+      /button|btn/i.test(name) ||
+      candidates.some(c => c.value && /(\/\/button|button\[|\.btn|input\[type=['"]?submit)/i.test(c.value));
+
+    const hasLoginText = /(log ?in|sign ?in|submit|continue|auth)\b/i.test(name) ||
+      /(log ?in|sign ?in|submit|continue|auth)\b/i.test(fingerprint.text || '') ||
+      /(log ?in|sign ?in|submit|continue|auth)\b/i.test(fingerprint.ariaLabel || '');
+
+    if (isButton && hasLoginText) return true;
+    if (candidates.some(c => c.value && /(button.*(log ?in|sign ?in)|btn-login|login-button|signin)/i.test(c.value))) return true;
   }
 
   // 4. Navigate to explicit login/auth URL
-  if (type === 'NAVIGATE' && action.url) {
+  if ((type === 'NAVIGATE' || type === 'navigate') && action.url) {
     if (/\/(login|signin|auth)\b/i.test(action.url) || /#(.*)\/(login|signin)/i.test(action.url)) {
       return true;
     }
@@ -77,44 +89,77 @@ function detectLoginSequence(actions) {
   }
 
   let passwordIndex = -1;
+  let usernameIndex = -1;
   let submitIndex = -1;
-  let hasUsername = false;
+  let lastLoginStepIndex = -1;
 
-  // Search within the first 10 actions for an authentication sequence
-  const searchLimit = Math.min(actions.length, 10);
+  // Search within the first 15 actions for an authentication sequence
+  const searchLimit = Math.min(actions.length, 15);
   for (let i = 0; i < searchLimit; i++) {
     const action = actions[i];
-    const type = (action.type || '').toUpperCase();
+    const type = (action.type || action.action || '').toUpperCase();
     const name = String(action.name || action.elementName || '').toLowerCase();
     const fp = action.target?.fingerprint || action.fingerprint || {};
     const candidates = Array.isArray(action.target?.candidates) ? action.target.candidates : [];
+    const url = action.url || '';
+    const isLoginUrl = /\/(login|signin|auth)\b/i.test(url) || /#(.*)\/(login|signin)/i.test(url);
 
-    const isPassword = (type === 'TYPE' && (action.meta?.isPassword || fp.type === 'password' || /password/i.test(name))) ||
+    // Initial navigation to login URL
+    if ((type === 'NAVIGATE' || type === 'navigate') && isLoginUrl) {
+      lastLoginStepIndex = i;
+      continue;
+    }
+
+    const isPassword = (action.meta?.isPassword || fp.type === 'password' || /password|pwd/i.test(name)) ||
       candidates.some(c => c.value && /password/i.test(c.value));
     if (isPassword) {
       passwordIndex = i;
+      lastLoginStepIndex = i;
     }
 
-    const isUser = /user(name)?|email|login/i.test(name) || /user(name)?|email|login/i.test(fp.name || '') ||
-      candidates.some(c => c.value && /(username|email)/i.test(c.value));
-    if (isUser) {
-      hasUsername = true;
-    }
-
-    const isSubmit = type === 'CLICK' && (
-      /(log ?in|sign ?in)/i.test(name) ||
-      /(log ?in|sign ?in)/i.test(fp.text || '') ||
-      candidates.some(c => c.value && /(log ?in|sign ?in)/i.test(c.value))
+    const isUser = (!isPassword && !/button|btn|submit/i.test(name)) && (
+      /user(name)?|email|user_id|userid/i.test(name) ||
+      /user(name)?|email|user_id|userid/i.test(fp.name || '') ||
+      candidates.some(c => c.value && /(username|user_name|user-name|email)/i.test(c.value))
     );
-    if (isSubmit && (passwordIndex >= 0 || hasUsername)) {
+    if (isUser) {
+      usernameIndex = i;
+      lastLoginStepIndex = i;
+    }
+
+    const isInput = type === 'TYPE' ||
+      (fp.tagName === 'input' && fp.type !== 'submit' && fp.type !== 'button') ||
+      (/input|field|textbox/i.test(name) && !/button|btn|submit/i.test(name)) ||
+      candidates.some(c => c.value && /(> *input|\/input\[|mat-select)/i.test(c.value));
+
+    // Submit button must be a CLICK on a button/submit element with login/signin/submit text
+    const isSubmitButton = type === 'CLICK' && !isInput && (
+      /(log ?in|sign ?in|submit|continue)\b/i.test(name) ||
+      /(log ?in|sign ?in|submit|continue)\b/i.test(fp.text || '') ||
+      /(log ?in|sign ?in|submit|continue)\b/i.test(fp.ariaLabel || '') ||
+      candidates.some(c => c.value && /(\/\/button.*(log ?in|sign ?in)|button\[.*(log ?in|sign ?in)|btn-login|login-btn|signin-btn|input\[type=['"]?submit)/i.test(c.value))
+    );
+
+    if (isSubmitButton) {
       submitIndex = i;
-      break; // Found the end of the login block
+      lastLoginStepIndex = i;
+      // If we already saw password or username, this submit button completes the login sequence!
+      if (passwordIndex >= 0 || usernameIndex >= 0) {
+        break;
+      }
+    }
+
+    // Password visibility toggle or checkbox on login form
+    if (type === 'CLICK' && isLoginUrl && (passwordIndex >= 0 || usernameIndex >= 0)) {
+      if (/password|eye|toggle|remember/i.test(name) || /password|eye|toggle|remember/i.test(fp.ariaLabel || '')) {
+        lastLoginStepIndex = i;
+      }
     }
   }
 
   // If we found a password step and/or a submit step
-  if (passwordIndex >= 0 || (hasUsername && submitIndex >= 0)) {
-    const endIndex = submitIndex >= 0 ? submitIndex : passwordIndex;
+  if (passwordIndex >= 0 || (usernameIndex >= 0 && submitIndex >= 0) || submitIndex >= 0) {
+    const endIndex = submitIndex >= 0 ? submitIndex : lastLoginStepIndex;
     const startIndex = 0;
     const firstPostLoginIndex = endIndex + 1;
 
@@ -149,7 +194,7 @@ function detectLoginSequence(actions) {
  * @returns {Promise<boolean>} True if the page appears already logged in
  */
 async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
-  if (!page || page.isClosed()) return false;
+  if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return false;
 
   try {
     const currentUrl = page.url();
@@ -157,23 +202,45 @@ async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
       return false;
     }
 
-    // 1. Check if the page currently has a visible password input
-    const hasVisiblePassword = await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input[type="password"], input[name*="password" i], input[id*="password" i]'));
-      return inputs.some(el => {
-        if (el.offsetParent === null && el.tagName.toLowerCase() !== 'body') return false;
-        const style = window.getComputedStyle(el);
-        return style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0.1;
-      });
-    }).catch(() => false);
-
-    // If a visible password field is right in front of the browser, it is NOT logged in
-    if (hasVisiblePassword) {
+    // 1. If the current URL is explicitly a login/signin/auth route, it is NOT authenticated
+    const isLoginUrl = /\/(login|signin|auth)\b/i.test(currentUrl) || /#(.*)\/(login|signin)\b/i.test(currentUrl);
+    if (isLoginUrl) {
       return false;
     }
 
+    // 2. Check if the page displays any login form or login credentials prompts
+    const hasLoginForm = await page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        if (el.offsetParent === null && el.tagName.toLowerCase() !== 'body') return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0.1;
+      };
+
+      // Visible password input
+      const passwordInputs = Array.from(document.querySelectorAll('input[type="password"], input[name*="password" i], input[id*="password" i]'));
+      if (passwordInputs.some(isVisible)) return true;
+
+      // Visible "Log In" / "Sign In" button or submit button
+      const allButtons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a[role="button"]'));
+      const hasLoginButton = allButtons.some(el => {
+        if (!isVisible(el)) return false;
+        const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+        return /^(log ?in|sign ?in)$/i.test(text);
+      });
+      if (hasLoginButton) return true;
+
+      return false;
+    }).catch(() => false);
+
+    if (hasLoginForm) {
+      return false;
+    }
+
+    // 3. Check for 2FA / OTP challenges
     const is2faUrl = /\/(2fa|mfa|two-factor|two-step|challenge|otp|verify|verification|security-code)\b/i.test(currentUrl);
     if (is2faUrl) return false;
+
     const hasVisibleOtpInput = await page.evaluate(() => {
       const otpSelectors = [
         'input[autocomplete="one-time-code"]',
@@ -190,43 +257,9 @@ async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
     }).catch(() => false);
     if (hasVisibleOtpInput) return false;
 
-    // 2. Check URL: if the current URL clearly is on an authenticated route vs login route
-    const isLoginUrl = /\/(login|signin|auth)\b/i.test(currentUrl) || /#(.*)\/(login|signin)/i.test(currentUrl);
-    const isAuthenticatedUrl = /\/(home|dashboard|my-reports|reports|invoices|portal|app|workspace|overview)\b/i.test(currentUrl) ||
-      /#\/(home|dashboard|my-reports|reports|invoices|portal|app|workspace|overview)/i.test(currentUrl);
-
-    if (isAuthenticatedUrl && !isLoginUrl) {
-      return true;
-    }
-
-    // 3. Check for common authenticated DOM indicators (Logout button, User profile, main nav toolbar)
-    const hasAuthIndicator = await page.evaluate(() => {
-      const authSelectors = [
-        'a[href*="logout" i]',
-        'button:has-text("Log out")',
-        'button:has-text("Sign out")',
-        '.user-avatar',
-        '.user-profile',
-        'mat-toolbar',
-        '.app-header .user-info',
-        'app-my-reports',
-        '.x-grid',
-        '[role="navigation"]'
-      ];
-      for (const sel of authSelectors) {
-        try {
-          const el = document.querySelector(sel);
-          if (el && (el.offsetParent !== null || el.tagName.toLowerCase() === 'body')) return true;
-        } catch {}
-      }
-      return false;
-    }).catch(() => false);
-
-    if (hasAuthIndicator) {
-      return true;
-    }
-
     // 4. Target Element Probe: Can we already find the target of firstPostLoginAction?
+    // If the element targeted immediately after login is visible and present on this page,
+    // we are definitely authenticated!
     if (loginSeq.firstPostLoginAction && loginSeq.firstPostLoginAction.target) {
       const targetCandidates = loginSeq.firstPostLoginAction.target.candidates || [];
       const hasTarget = await page.evaluate((candidates) => {
@@ -234,7 +267,7 @@ async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
           if (!el) return false;
           if (el.offsetParent === null && el.tagName.toLowerCase() !== 'body') return false;
           const s = window.getComputedStyle(el);
-          return s.display !== 'none' && s.visibility !== 'hidden';
+          return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0.1;
         };
 
         for (const c of candidates) {
@@ -242,6 +275,12 @@ async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
           if (c.strategy === 'css-path' || c.strategy === 'id' || c.strategy === 'attribute') {
             try {
               const el = document.querySelector(c.value);
+              if (el && visible(el)) return true;
+            } catch {}
+          } else if (c.strategy === 'xpath') {
+            try {
+              const res = document.evaluate(c.value, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+              const el = res.singleNodeValue;
               if (el && visible(el)) return true;
             } catch {}
           }
@@ -254,8 +293,42 @@ async function isSessionAuthenticated(page, loginSeq = {}, options = {}) {
       }
     }
 
-    // If URL is not a login URL and password field is absent, consider authenticated if on same origin
-    if (!isLoginUrl && !hasVisiblePassword) {
+    // 5. Check for genuine authenticated DOM indicators (Logout button, User profile avatar)
+    const hasAuthIndicator = await page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        if (el.offsetParent === null && el.tagName.toLowerCase() !== 'body') return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0.1;
+      };
+
+      // Genuine logout links or buttons
+      const linksAndButtons = Array.from(document.querySelectorAll('a, button'));
+      const hasLogout = linksAndButtons.some(el => {
+        if (!isVisible(el)) return false;
+        const href = (el.getAttribute('href') || '').toLowerCase();
+        const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').toLowerCase().trim();
+        return href.includes('logout') || href.includes('signout') || /^(log ?out|sign ?out)$/i.test(text);
+      });
+      if (hasLogout) return true;
+
+      // User profile / avatar elements
+      const profile = document.querySelector('.user-avatar, .user-profile, .app-header .user-info, [aria-label*="Profile" i], [aria-label*="Account" i]');
+      if (profile && isVisible(profile)) return true;
+
+      return false;
+    }).catch(() => false);
+
+    if (hasAuthIndicator) {
+      return true;
+    }
+
+    // 6. Check for authenticated URL routes (dashboard, my-reports, invoices, workspace, app, etc.)
+    // If on a dedicated post-login application route with no login form or login button, consider authenticated
+    const isAuthenticatedUrl = /\/(dashboard|my-reports|reports|invoices|workspace|overview)\b/i.test(currentUrl) ||
+      /#\/(dashboard|my-reports|reports|invoices|workspace|overview)/i.test(currentUrl);
+
+    if (isAuthenticatedUrl && !isLoginUrl && !hasLoginForm) {
       return true;
     }
 

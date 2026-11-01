@@ -508,9 +508,17 @@ class LoopReplayRunner {
           const isCurrentLogin = /\/login\b|\/signin\b|\/auth\b/i.test(currentUrl) || /#(.*)\/(login|signin)/i.test(currentUrl);
 
           if (isTargetLogin && !isCurrentLogin) {
-            // Target is explicitly login, but current page is already logged in past the login screen
-            shouldNavigate = false;
-            logger.info(`[Runner] Session already active at "${currentUrl}". Preserving active session instead of navigating back to login URL: ${resolved}`);
+            // Check if current page has an active, authenticated session
+            const steps = workflow?.steps || (workflow?.recordingData?.actions) || workflow?.actions || [];
+            const loginSeq = detectLoginSequence(steps);
+            const isAuth = await isSessionAuthenticated(page, loginSeq);
+            if (isAuth) {
+              shouldNavigate = false;
+              logger.info(`[Runner] Session already active at "${currentUrl}". Preserving active session instead of navigating back to login URL: ${resolved}`);
+            } else {
+              shouldNavigate = true;
+              logger.info(`[Runner] Page at "${currentUrl}" is not authenticated. Navigating to start URL: ${resolved}`);
+            }
           } else {
             // Compare normalized paths, search queries, and hashes
             const normCurrent = (currentParsed.pathname.replace(/\/+$/, '') || '/') + (currentParsed.search || '') + (currentParsed.hash.replace(/\/+$/, '') || '');
