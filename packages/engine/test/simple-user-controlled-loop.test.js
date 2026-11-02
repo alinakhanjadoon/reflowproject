@@ -428,4 +428,244 @@ describe('Simple, User-Controlled Looping (v1.0)', () => {
       }
     });
   });
+
+  describe('6. In-Loop IF/ELSE Conditions & Multi-Structure Safety', () => {
+    const ItemExecutionHandler = require('../src/replay/loop/item-execution-handler');
+    const { ConditionEvaluator } = require('../src/shared/condition-evaluator');
+
+    test('In-loop IF condition executes action when matching item fields', async () => {
+      const handler = new ItemExecutionHandler();
+      const mockPage = {
+        url: () => 'https://example.com/invoices',
+        bringToFront: async () => {},
+        keyboard: { press: async () => {} }
+      };
+
+      const generalizedActions = [
+        {
+          type: 'CLICK',
+          name: 'Download Pending Invoice',
+          scope: 'page',
+          condition: { field: 'Status', operator: 'equals', value: 'Pending' }
+        }
+      ];
+
+      const itemResult = { actions: [], downloadedFiles: [] };
+      const manifest = { results: [], itemsSucceeded: 0 };
+      const targetItem = { fields: { 'Invoice No': 'INV-100', 'Status': 'Pending' } };
+      const itemIdentifier = { itemKey: 'inv_1', itemLabel: 'INV-100' };
+
+      const executed = [];
+      const mockReplayEngine = {
+        executeAction: async (act) => executed.push(act.name),
+        dismissOverlays: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      await handler.executeItemWithRetries({
+        page: mockPage,
+        discovery: { itemCount: 1 },
+        i: 0,
+        itemResult,
+        startingActionOffset: 0,
+        targetItem,
+        itemIdentifier,
+        generalizedActions,
+        effectiveLoopStepIndex: 2,
+        isDropdown: false,
+        triggerStep: null,
+        partition: { setupSteps: [] },
+        currentPageUrl: 'https://example.com/invoices',
+        initialPageUrls: new Set(),
+        currentPage: 1,
+        manifest,
+        runner: {
+          isAborted: false,
+          maxItemRetries: 0,
+          replayEngine: mockReplayEngine,
+          writeLoopCheckpoint: () => {},
+          isCollectionPresent: async () => true,
+          snapshotDownloadedFiles: () => ({ runFiles: [], osFiles: [] }),
+          waitForDownload: async () => []
+        }
+      });
+
+      assert.equal(executed.length, 1, 'Action should have executed when condition was met');
+      assert.equal(executed[0], 'Download Pending Invoice');
+      assert.equal(itemResult.actions[0].status, 'SUCCESS');
+    });
+
+    test('In-loop IF condition skips action safely when condition is not met', async () => {
+      const handler = new ItemExecutionHandler();
+      const mockPage = {
+        url: () => 'https://example.com/invoices',
+        bringToFront: async () => {},
+        keyboard: { press: async () => {} }
+      };
+
+      const generalizedActions = [
+        {
+          type: 'CLICK',
+          name: 'Download Pending Invoice',
+          scope: 'page',
+          condition: { field: 'Status', operator: 'equals', value: 'Pending' }
+        }
+      ];
+
+      const itemResult = { actions: [], downloadedFiles: [] };
+      const manifest = { results: [], itemsSucceeded: 0 };
+      const targetItem = { fields: { 'Invoice No': 'INV-101', 'Status': 'Paid' } }; // Status is Paid, not Pending!
+      const itemIdentifier = { itemKey: 'inv_2', itemLabel: 'INV-101' };
+
+      const executed = [];
+      const mockReplayEngine = {
+        executeAction: async (act) => executed.push(act.name),
+        dismissOverlays: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      await handler.executeItemWithRetries({
+        page: mockPage,
+        discovery: { itemCount: 1 },
+        i: 0,
+        itemResult,
+        startingActionOffset: 0,
+        targetItem,
+        itemIdentifier,
+        generalizedActions,
+        effectiveLoopStepIndex: 2,
+        isDropdown: false,
+        triggerStep: null,
+        partition: { setupSteps: [] },
+        currentPageUrl: 'https://example.com/invoices',
+        initialPageUrls: new Set(),
+        currentPage: 1,
+        manifest,
+        runner: {
+          isAborted: false,
+          maxItemRetries: 0,
+          replayEngine: mockReplayEngine,
+          writeLoopCheckpoint: () => {},
+          isCollectionPresent: async () => true,
+          snapshotDownloadedFiles: () => ({ runFiles: [], osFiles: [] }),
+          waitForDownload: async () => []
+        }
+      });
+
+      assert.equal(executed.length, 0, 'Action should NOT execute when condition is not met');
+      assert.equal(itemResult.actions[0].status, 'SKIPPED');
+      assert.match(itemResult.actions[0].reason, /does not equal|condition/i);
+    });
+
+    test('In-loop condition with missing field skips safely without throwing', async () => {
+      const handler = new ItemExecutionHandler();
+      const mockPage = {
+        url: () => 'https://example.com/invoices',
+        bringToFront: async () => {},
+        keyboard: { press: async () => {} }
+      };
+
+      const generalizedActions = [
+        {
+          type: 'CLICK',
+          name: 'Action on Nonexistent Field',
+          scope: 'page',
+          condition: { field: 'UnknownField', operator: 'equals', value: 'Special' }
+        }
+      ];
+
+      const itemResult = { actions: [], downloadedFiles: [] };
+      const manifest = { results: [], itemsSucceeded: 0 };
+      const targetItem = { fields: { 'Invoice No': 'INV-102' } }; // No UnknownField!
+      const itemIdentifier = { itemKey: 'inv_3', itemLabel: 'INV-102' };
+
+      const executed = [];
+      const mockReplayEngine = {
+        executeAction: async (act) => executed.push(act.name),
+        dismissOverlays: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      await handler.executeItemWithRetries({
+        page: mockPage,
+        discovery: { itemCount: 1 },
+        i: 0,
+        itemResult,
+        startingActionOffset: 0,
+        targetItem,
+        itemIdentifier,
+        generalizedActions,
+        effectiveLoopStepIndex: 2,
+        isDropdown: false,
+        triggerStep: null,
+        partition: { setupSteps: [] },
+        currentPageUrl: 'https://example.com/invoices',
+        initialPageUrls: new Set(),
+        currentPage: 1,
+        manifest,
+        runner: {
+          isAborted: false,
+          maxItemRetries: 0,
+          replayEngine: mockReplayEngine,
+          writeLoopCheckpoint: () => {},
+          isCollectionPresent: async () => true,
+          snapshotDownloadedFiles: () => ({ runFiles: [], osFiles: [] }),
+          waitForDownload: async () => []
+        }
+      });
+
+      assert.equal(executed.length, 0);
+      assert.equal(itemResult.actions[0].status, 'SKIPPED');
+      assert.match(itemResult.actions[0].reason, /missing/i);
+    });
+
+    test('Multiple condition evaluation (AND / OR) with numeric and string comparisons', () => {
+      const item = {
+        'Invoice Number': 'INV-2001',
+        'Status': 'Pending',
+        'Amount': '$1,500.00',
+        'Date': '2026-10-15'
+      };
+
+      // 1. Compound AND matching
+      const andMatch = ConditionEvaluator.evaluate(item, {
+        matchMode: 'all',
+        conditions: [
+          { field: 'Status', operator: 'equals', value: 'Pending' },
+          { field: 'Amount', operator: 'greater_than', value: '1000' }
+        ]
+      });
+      assert.equal(andMatch.matches, true);
+
+      // 2. Compound AND non-matching on one rule
+      const andFail = ConditionEvaluator.evaluate(item, {
+        matchMode: 'all',
+        conditions: [
+          { field: 'Status', operator: 'equals', value: 'Pending' },
+          { field: 'Amount', operator: 'greater_than', value: '2000' } // 1500 is not > 2000
+        ]
+      });
+      assert.equal(andFail.matches, false);
+
+      // 3. Compound OR matching
+      const orMatch = ConditionEvaluator.evaluate(item, {
+        matchMode: 'any',
+        conditions: [
+          { field: 'Status', operator: 'equals', value: 'Closed' },
+          { field: 'Status', operator: 'equals', value: 'Pending' }
+        ]
+      });
+      assert.equal(orMatch.matches, true);
+
+      // 4. Missing field safely fails in AND
+      const missingField = ConditionEvaluator.evaluate(item, {
+        matchMode: 'all',
+        conditions: [
+          { field: 'NonexistentColumn', operator: 'equals', value: 'Test' }
+        ]
+      });
+      assert.equal(missingField.matches, false);
+      assert.match(missingField.reason, /missing/i);
+    });
+  });
 });

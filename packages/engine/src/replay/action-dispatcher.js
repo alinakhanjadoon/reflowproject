@@ -184,15 +184,28 @@ class ActionDispatcher {
         return value;
       };
 
-      // Prefer recorded CSS selectors, but only within this item.
+      // Prefer recorded CSS selectors or relative XPath, but only within this item.
       for (const candidate of candidates) {
         if (!candidate?.value) continue;
         const value = candidate.value;
-        const looksXPath = value.startsWith('//') || value.startsWith('(');
-        if (looksXPath) continue;
 
         // :scope represents the discovered item itself.
         if (value === ':scope') return visible(item) ? item : null;
+
+        // Support relative XPath starting with '.'
+        if (value.startsWith('.')) {
+          try {
+            const res = document.evaluate(value, item, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (let i = 0; i < res.snapshotLength; i++) {
+              const node = res.snapshotItem(i);
+              if (visible(node)) return node;
+            }
+          } catch {}
+          continue;
+        }
+
+        const looksXPath = value.startsWith('//') || value.startsWith('(');
+        if (looksXPath) continue;
 
         try {
           const matches = Array.from(item.querySelectorAll(value)).filter(visible);

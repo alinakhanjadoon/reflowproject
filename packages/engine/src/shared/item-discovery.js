@@ -301,6 +301,26 @@ class ItemDiscovery {
 
         if (matching.length < minItems) continue;
 
+        // Anchor Containment Validation:
+        // Ensure discovered candidate items actually contain the recorded anchor element or its equivalent
+        let anchorContainmentRatio = 1;
+        if (recorded && recorded !== itemForRecorded) {
+          const recTag = recorded.tagName.toLowerCase();
+          const recRole = (recorded.getAttribute('role') || '').toLowerCase();
+          let countWithAnchorEquivalent = 0;
+          for (const child of matching) {
+            if (child === itemForRecorded) {
+              countWithAnchorEquivalent++;
+              continue;
+            }
+            const hasEq = (recRole && child.querySelector(`[role="${recRole}"]`)) ||
+              (recTag && child.querySelector(recTag));
+            if (hasEq) countWithAnchorEquivalent++;
+          }
+          anchorContainmentRatio = countWithAnchorEquivalent / Math.max(1, matching.length);
+        }
+        if (anchorContainmentRatio < 0.5) continue;
+
         // 1. Detect if any sibling is a table header row/table and extract headerColumns & full layout
         let headerColumns = [];
         let rawHeaderLayout = [];
@@ -426,6 +446,12 @@ class ItemDiscovery {
           bonus
         );
 
+        const collType = (itemTagLower === 'tr' || itemRole === 'row' || (rawHeaderLayout.length > 0 && rawHeaderLayout.length === children.length))
+          ? 'table-row'
+          : (itemTagLower === 'mat-option' || itemRole === 'option' || itemTagLower === 'option'
+            ? 'dropdown-option'
+            : (itemTagLower === 'li' || itemRole === 'listitem' ? 'list-item' : 'card-grid'));
+
         candidates.push({
           score,
           itemCount: effectiveMatching.length,
@@ -435,7 +461,9 @@ class ItemDiscovery {
           ancestorTag: ancestorTagLower,
           ancestorSelector: buildAncestorSelector(ancestor),
           itemTag: itemTagLower,
+          itemClasses: itemClasses,
           itemSignature: itemSignature,
+          collectionType: collType,
           headerColumns,
           items: effectiveMatching.map((item, itemIndex) => {
             // Extract named columns from table header for table row records
@@ -690,11 +718,14 @@ class ItemDiscovery {
         recordedIndex: best.recordedIndex,
         targetColumn: best.targetColumn,
         targetActionValue: best.targetActionValue,
+        collectionType: best.collectionType || 'table-row',
         collection: {
           ancestorTag: best.ancestorTag,
           ancestorSelector: best.ancestorSelector,
           itemTag: best.itemTag,
+          itemClasses: best.itemClasses,
           itemSignature: best.itemSignature,
+          collectionType: best.collectionType || 'table-row',
           headerColumns: best.headerColumns
         },
         items: best.items,

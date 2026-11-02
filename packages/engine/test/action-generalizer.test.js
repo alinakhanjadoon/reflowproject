@@ -52,14 +52,55 @@ function run() {
   assert(generalizedActions.every(ActionGeneralizer.isGeneralized));
   console.log('  ✅ Multi-action generalization passed\\n');
 
-  console.log('🔹 Test 5: Ignore non-CSS candidates');
+  console.log('🔹 Test 5: Ignore non-CSS candidates lacking row ancestry');
   const target = ActionGeneralizer.generalizeTarget({
     candidates: [{ strategy: 'xpath', value: '//a[text()="Download"]' }],
     fingerprint: { tagName: 'a', text: 'Download' }
   }, { itemTag: 'tr' });
   assert.strictEqual(target.candidates.length, 0);
   assert.strictEqual(target.fingerprint.text, 'Download');
-  console.log('  ✅ Non-CSS candidate handling passed\n');
+  console.log('  ✅ Non-CSS non-row candidate handling passed\n');
+
+  console.log('🔹 Test 6: Convert row-anchored absolute XPath to item-relative XPath');
+  const relXpath = ActionGeneralizer.toRelativeXPath('//table[@id="invoices"]//tr[1]//button[@title="Download"]', 'tr');
+  assert.strictEqual(relXpath, './/button[@title="Download"]');
+  const targetXpath = ActionGeneralizer.generalizeTarget({
+    candidates: [{ strategy: 'xpath', value: '//table[@id="invoices"]//tr[1]//button[@title="Download"]' }],
+    fingerprint: { tagName: 'button', text: 'Download' }
+  }, { itemTag: 'tr' });
+  assert.strictEqual(targetXpath.candidates.length, 1);
+  assert.strictEqual(targetXpath.candidates[0].value, './/button[@title="Download"]');
+  assert.strictEqual(targetXpath.candidates[0].strategy, 'xpath');
+  console.log('  ✅ Relative XPath generalization passed\n');
+
+  console.log('🔹 Test 7: In-row button with standalone ID is item-scoped and generalized');
+  const inRowAction = {
+    type: 'CLICK',
+    target: {
+      candidates: [{ strategy: 'css-path', value: '#download-btn-row-2' }],
+      fingerprint: { tagName: 'button', text: 'Download', id: 'download-btn-row-2' }
+    }
+  };
+  assert.strictEqual(ActionGeneralizer.isItemRelative(inRowAction, { itemTag: 'tr' }), true);
+  const genInRow = ActionGeneralizer.generalizeAction(inRowAction, { itemTag: 'tr' });
+  assert.strictEqual(genInRow.scope, 'item');
+  assert.strictEqual(genInRow.target.candidates[0].value, '[id*="download-btn"]');
+  console.log('  ✅ Standalone row-indexed ID generalization passed\n');
+
+  console.log('🔹 Test 8: In-row button with static ID is scoped to item');
+  const staticIdAction = {
+    type: 'CLICK',
+    isDownload: true,
+    target: {
+      candidates: [{ strategy: 'css-path', value: '#download-btn' }],
+      fingerprint: { tagName: 'button', text: 'Download', id: 'download-btn', parentTag: 'td' }
+    }
+  };
+  assert.strictEqual(ActionGeneralizer.isItemRelative(staticIdAction, { itemTag: 'tr' }), true);
+  const genStatic = ActionGeneralizer.generalizeAction(staticIdAction, { itemTag: 'tr' });
+  assert.strictEqual(genStatic.scope, 'item');
+  assert.strictEqual(genStatic.target.candidates[0].value, '[id="download-btn"]');
+  console.log('  ✅ In-row static ID item-scoping passed\n');
 
   console.log('🎉 ALL ACTION GENERALIZER TESTS PASSED SUCCESSFULLY!\n');
 }

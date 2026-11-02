@@ -139,7 +139,12 @@ export async function POST(
     }
   });
 
-  // 4. Default portal fields
+  // 4. Extract any captured sample items or table rows
+  const sampleItems: Array<any> = Array.isArray(fr.sampleItems) && fr.sampleItems.length > 0
+    ? fr.sampleItems
+    : (Array.isArray(wd.sampleItems) ? wd.sampleItems : []);
+
+  // 5. Default portal fields
   ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'].forEach(addCol);
   const defaults: Record<string, string[]> = {
     Type: ['Invoice', 'Bill', 'Statement', 'Credit Note', 'Receipt', 'Payment', 'Order'],
@@ -153,8 +158,10 @@ export async function POST(
   return NextResponse.json({
     success: true,
     workflow_id: id,
+    collectionType: 'table-row',
     availableFields: Array.from(fields),
     fieldValues: fieldValuesMap,
-    itemCount: steps.length,
+    itemCount: sampleItems.length,
+    items: sampleItems.slice(0, 50)
   });
 }

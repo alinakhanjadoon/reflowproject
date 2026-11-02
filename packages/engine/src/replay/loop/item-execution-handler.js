@@ -878,6 +878,30 @@ class ItemExecutionHandler {
 
           const action = generalizedActions[actionOffset];
           const actionType = action.type || action.action || 'CLICK';
+
+          // Evaluate in-loop IF/ELSE condition if attached to this action step
+          const actionCondition = action.condition || action.conditions || action.if || action.filter;
+          if (actionCondition) {
+            const itemRecord = Object.assign({}, targetItem.fields || {}, {
+              _rawText: itemIdentifier.itemLabel,
+              _index: i
+            });
+            const condResult = ConditionEvaluator.evaluate(itemRecord, actionCondition);
+            if (!condResult.matches) {
+              logger.info(`[Loop Runner] Skipping Action #${effectiveLoopStepIndex + actionOffset + 1} (${actionType}) for item #${i + 1}: ${condResult.reason || 'Step condition evaluated to false'}`);
+              const skippedResult = {
+                index: effectiveLoopStepIndex + actionOffset + 1,
+                type: actionType,
+                status: 'SKIPPED',
+                reason: condResult.reason || 'Step condition evaluated to false'
+              };
+              itemResult.actions.push(skippedResult);
+              nextActionOffset = actionOffset + 1;
+              writeLoopCheckpoint(manifest, itemResult.index, nextActionOffset, currentPage, i, itemResult);
+              continue;
+            }
+          }
+
           const beforeActionFiles = snapshotDownloadedFiles();
 
           if (isDropdown && actionOffset === 0 && action.scope === 'item') {

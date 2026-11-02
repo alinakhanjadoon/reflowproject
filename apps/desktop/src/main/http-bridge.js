@@ -352,31 +352,43 @@ class HttpBridge {
 
             // Also inspect workflow steps for target elements and ItemDiscovery
             const steps = workflow?.steps || workflow?.workflow_definition?.steps || [];
+            let liveDiscovery = null;
+            let activeAnchorIdx = 0;
             if (steps.length > 0) {
-              const stepIdx = Number.isInteger(body.loopStepIndex) ? body.loopStepIndex : 0;
+              const stepIdx = Number.isInteger(body.loopStepIndex) ? body.loopStepIndex : (Number.isInteger(body.anchorStepIndex) ? body.anchorStepIndex : 0);
+              activeAnchorIdx = stepIdx;
               const targetStep = steps[stepIdx] || steps[0];
               if (targetStep) {
-                const discovery = await ItemDiscovery.discover(page, targetStep.target || targetStep.fingerprint, {
+                liveDiscovery = await ItemDiscovery.discover(page, targetStep.target || targetStep.fingerprint, {
                   minItems: 1,
                   minScore: 0.4
                 }).catch(() => null);
 
-                if (discovery && discovery.success) {
-                  totalItemCount = Math.max(totalItemCount, discovery.itemCount || 0);
-                  if (typeof LoopReplayRunner.extractDiscoveredItems === 'function') {
-                    const extracted = await LoopReplayRunner.extractDiscoveredItems(page, discovery).catch(() => []);
-                    if (Array.isArray(extracted)) {
-                      extracted.forEach(it => {
-                        if (it.fields) {
-                          Object.entries(it.fields).forEach(([k, v]) => {
-                            if (k && typeof k === 'string') {
-                              discoveredCols.add(k.trim());
-                              addVal(k.trim(), v);
-                            }
-                          });
-                        }
-                      });
-                    }
+                if (liveDiscovery && liveDiscovery.success) {
+                  totalItemCount = Math.max(totalItemCount, liveDiscovery.itemCount || 0);
+                  const discItems = Array.isArray(liveDiscovery.items) && liveDiscovery.items.length > 0
+                    ? liveDiscovery.items
+                    : (typeof LoopReplayRunner.extractDiscoveredItems === 'function'
+                      ? await LoopReplayRunner.extractDiscoveredItems(page, liveDiscovery).catch(() => [])
+                      : []);
+
+                  if (Array.isArray(discItems) && discItems.length > 0) {
+                    primaryItems = discItems.map((it, idx) => ({
+                      index: idx,
+                      id: it.fields?.['Invoice Number'] || it.fields?.['Invoice No'] || it.fields?.['Invoice #'] || it.fields?.['ID'] || it.fields?.['Identifier'] || `Record #${idx + 1}`,
+                      fields: it.fields || {},
+                      text: it.fields?._rawText || it.text || ''
+                    }));
+                    discItems.forEach(it => {
+                      if (it.fields) {
+                        Object.entries(it.fields).forEach(([k, v]) => {
+                          if (k && typeof k === 'string' && !k.startsWith('_')) {
+                            discoveredCols.add(k.trim());
+                            addVal(k.trim(), v);
+                          }
+                        });
+                      }
+                    });
                   }
                 }
               }
@@ -389,6 +401,8 @@ class HttpBridge {
 
             return this.sendJson(req, res, 200, {
               success: true,
+              collectionType: (liveDiscovery && (liveDiscovery.collectionType || liveDiscovery.collection?.collectionType)) || 'table-row',
+              anchorStepIndex: activeAnchorIdx,
               availableFields: Array.from(discoveredCols),
               fieldValues: cleanFieldValues,
               itemCount: totalItemCount,

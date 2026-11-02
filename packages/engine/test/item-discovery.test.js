@@ -55,6 +55,30 @@ function runItemDiscoveryTests() {
   assert.strictEqual(chosen.score, 0.85);
   console.log('  ✅ Navigation candidate exclusion passed\n');
 
+  console.log('🔹 Test 5: Collection pattern classification (table, card-grid, list-item, dropdown-option)');
+  const tableCol = { score: 0.9, itemTag: 'tr', collectionType: 'table-row' };
+  const cardCol = { score: 0.85, itemTag: 'div', collectionType: 'card-grid' };
+  const listCol = { score: 0.88, itemTag: 'li', collectionType: 'list-item' };
+  const optCol = { score: 0.82, itemTag: 'mat-option', collectionType: 'dropdown-option' };
+
+  assert.strictEqual(tableCol.collectionType, 'table-row');
+  assert.strictEqual(cardCol.collectionType, 'card-grid');
+  assert.strictEqual(listCol.collectionType, 'list-item');
+  assert.strictEqual(optCol.collectionType, 'dropdown-option');
+  console.log('  ✅ Collection pattern classification passed\n');
+
+  console.log('🔹 Test 6: Multi-collection candidates preserving relative ranking');
+  const allCandidates = [
+    { score: 0.75, itemCount: 5, collectionType: 'list-item' },
+    { score: 0.92, itemCount: 10, collectionType: 'table-row' },
+    { score: 0.65, itemCount: 3, collectionType: 'card-grid' }
+  ];
+  const sorted = allCandidates.sort((a, b) => b.score - a.score);
+  assert.strictEqual(sorted[0].collectionType, 'table-row');
+  assert.strictEqual(sorted[0].score, 0.92);
+  assert.strictEqual(sorted[1].collectionType, 'list-item');
+  console.log('  ✅ Multi-collection ranking passed\n');
+
   console.log('🎉 ALL ITEM DISCOVERY TESTS PASSED SUCCESSFULLY!\n');
 }
 

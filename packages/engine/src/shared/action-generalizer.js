@@ -133,6 +133,7 @@ class ActionGeneralizer {
     for (const candidate of candidates) {
       if (!candidate || !candidate.value) continue;
       if (this.toRelativeCss(candidate.value, tag)) return true;
+      if (this.toRelativeXPath(candidate.value, tag)) return true;
       const val = String(candidate.value).trim().toLowerCase();
       if (candidate.strategy === 'xpath' || val.startsWith('/') || val.startsWith('(')) {
         if (val.includes(`//${tag}`) || val.includes(`/${tag}/`) || val.includes(`/${tag}[`)) {
@@ -145,11 +146,17 @@ class ActionGeneralizer {
     for (const candidate of candidates) {
       if (!candidate || !candidate.value) continue;
       const val = String(candidate.value).trim();
-      if (/(?:^|[#._-])(?:row|item|record|tr)[-_]?\d+/i.test(val)) {
+      if (/(?:^|[#._-])(?:row|item|record|tr|entry|card|col)[-_]?\d+/i.test(val)) {
         return true;
       }
     }
-    if (fp.id && /(?:^|[#._-])(?:row|item|record|tr)[-_]?\d+/i.test(fp.id)) {
+    if (fp.id && /(?:^|[#._-])(?:row|item|record|tr|entry|card)[-_]?\d+/i.test(fp.id)) {
+      return true;
+    }
+
+    // In-record interactive elements (buttons, links, inputs, checkboxes)
+    // inside the repeating range with parent cell or inRow context
+    if (action.isDownload || action.inRow) {
       return true;
     }
 
@@ -174,6 +181,7 @@ class ActionGeneralizer {
       if (relative) {
         generalizedCandidates.push({
           ...candidate,
+          strategy: 'css-path',
           value: relative,
           uniqueness: undefined,
           priority: Math.max(Number(candidate.priority) || 0, 6),
@@ -182,20 +190,41 @@ class ActionGeneralizer {
         continue;
       }
 
-      // Generalize standalone ID selectors containing row index patterns (e.g. #download-btn-row-1)
+      // Check relative XPath
+      const relativeXp = this.toRelativeXPath(candidate.value, collection.itemTag);
+      if (relativeXp) {
+        generalizedCandidates.push({
+          ...candidate,
+          strategy: 'xpath',
+          value: relativeXp,
+          priority: Math.max(Number(candidate.priority) || 0, 6),
+          scope: 'item'
+        });
+        continue;
+      }
+
+      // Generalize standalone ID selectors (e.g. #download-btn-row-1 -> [id*="download-btn"], or in-row #btn-dl)
       const val = String(candidate.value).trim();
       const idMatch = val.match(/^#([a-zA-Z0-9_-]+)/);
       if (idMatch) {
         const fullId = idMatch[1];
         const baseId = fullId.replace(/(?:[-_]?(?:row|item|record|tr))?[-_]?\d+.*$/i, '');
-        if (baseId && baseId.length >= 3) {
+        if (baseId && baseId.length >= 3 && baseId !== fullId) {
           generalizedCandidates.push({
             strategy: 'css-path',
             value: `[id*="${baseId}"]`,
             priority: Math.max(Number(candidate.priority) || 0, 5),
             scope: 'item'
           });
+        } else {
+          generalizedCandidates.push({
+            strategy: 'css-path',
+            value: `[id="${fullId}"]`,
+            priority: Math.max(Number(candidate.priority) || 0, 5),
+            scope: 'item'
+          });
         }
+        continue;
       }
     }
 
@@ -222,6 +251,26 @@ class ActionGeneralizer {
         itemSignature: collection.itemSignature || null
       }
     };
+  }
+
+  /**
+   * Converts an absolute XPath referencing a table row or card into an item-relative XPath.
+   * Example: //table[@id="invoices"]//tr[1]//button[@title="Download"]
+   * becomes: .//button[@title="Download"]
+   */
+  static toRelativeXPath(xpath, itemTag) {
+    if (typeof xpath !== 'string' || !xpath.trim()) return null;
+    const tag = String(itemTag || 'tr').toLowerCase().trim();
+    if (!tag) return null;
+
+    // Pattern: match /<tag>[...] or /<tag>/ and take everything after it
+    const tagPattern = tag.replace(/[^a-z0-9_-]/gi, '');
+    const regex = new RegExp(`/(?:${tagPattern}|\\[@role=['"](?:row|gridcell|listitem|option)['"]\\])(?:\\[[^\\]]*\\])?(/.*)$`, 'i');
+    const match = xpath.match(regex);
+    if (match && match[1]) {
+      return '.' + match[1];
+    }
+    return null;
   }
 
   /**

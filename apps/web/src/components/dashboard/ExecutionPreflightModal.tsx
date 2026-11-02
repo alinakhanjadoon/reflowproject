@@ -16,7 +16,8 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Clock
+  Clock,
+  Eye
 } from 'lucide-react';
 import { Workflow } from '@/lib/types/database';
 import { DrawerRunItem } from './RunDetailsDrawer';
@@ -365,6 +366,11 @@ export function ExecutionPreflightModal({
   const [loopStepIndex, setLoopStepIndex] = useState<number>(0);
   const [autoDetectedIndex, setAutoDetectedIndex] = useState<number>(0);
 
+  // Discovered records preview state
+  const [discoveredRecords, setDiscoveredRecords] = useState<Array<any>>([]);
+  const [discoveredCollectionType, setDiscoveredCollectionType] = useState<string>('table-row');
+  const [discoveredItemCount, setDiscoveredItemCount] = useState<number>(0);
+
   // Filter rules state
   const [filterEnabled, setFilterEnabled] = useState<boolean>(false);
   const [matchMode, setMatchMode] = useState<'all' | 'any'>('all');
@@ -557,8 +563,55 @@ export function ExecutionPreflightModal({
     }
   };
 
-  const handleRefreshFields = async (targetWorkflow?: Workflow | null) => {
+  const doesRecordMatchFilter = (
+    recordFields: Record<string, any>,
+    rules: FilterConditionRow[],
+    mode: 'all' | 'any'
+  ): { matches: boolean } => {
+    if (!rules || rules.length === 0) return { matches: true };
+    const results: boolean[] = [];
+
+    for (const c of rules) {
+      const isCustom = c.field === '__custom__';
+      const fieldName = (isCustom ? c.customField : c.field).trim();
+      if (!fieldName) continue;
+
+      let rawVal: any = undefined;
+      for (const [k, v] of Object.entries(recordFields)) {
+        if (k.toLowerCase() === fieldName.toLowerCase()) {
+          rawVal = v;
+          break;
+        }
+      }
+
+      if (rawVal === undefined || rawVal === null || rawVal === '') {
+        results.push(false);
+        continue;
+      }
+
+      const strVal = String(rawVal).trim();
+      if (c.operator === 'dateBetween') {
+        const from = (c.dateFrom || '').trim();
+        const to = (c.dateTo || '').trim();
+        const d = strVal.slice(0, 10);
+        let ok = true;
+        if (from && d < from) ok = false;
+        if (to && d > to) ok = false;
+        results.push(ok);
+      } else if (c.operator === 'equals') {
+        results.push(strVal.toLowerCase() === (c.value || '').trim().toLowerCase());
+      } else {
+        results.push(strVal.toLowerCase().includes((c.value || '').trim().toLowerCase()));
+      }
+    }
+
+    if (results.length === 0) return { matches: true };
+    return { matches: mode === 'any' ? results.some(Boolean) : results.every(Boolean) };
+  };
+
+  const handleRefreshFields = async (targetWorkflow?: Workflow | null, overrideAnchorIdx?: number) => {
     const wf = targetWorkflow || workflow;
+    const effectiveAnchor = Number.isInteger(overrideAnchorIdx) ? overrideAnchorIdx : anchorStepIndex;
     setScanningColumns(true);
     setScanMessage(null);
     try {
@@ -572,7 +625,8 @@ export function ExecutionPreflightModal({
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           workflow: wf,
-          loopStepIndex,
+          loopStepIndex: effectiveAnchor,
+          anchorStepIndex: effectiveAnchor,
           url: wf?.portal_url
         })
       }).catch(() => null);
@@ -582,7 +636,12 @@ export function ExecutionPreflightModal({
           method: 'POST',
           signal: controller.signal,
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ workflow: wf, loopStepIndex, url: wf?.portal_url })
+          body: JSON.stringify({
+            workflow: wf,
+            loopStepIndex: effectiveAnchor,
+            anchorStepIndex: effectiveAnchor,
+            url: wf?.portal_url
+          })
         }).catch(() => null);
       }
 
@@ -619,6 +678,15 @@ export function ExecutionPreflightModal({
         };
 
         if (data) {
+          if (Array.isArray(data.items)) {
+            setDiscoveredRecords(data.items);
+          }
+          if (data.itemCount !== undefined && data.itemCount !== null) {
+            setDiscoveredItemCount(Number(data.itemCount) || 0);
+          }
+          if (data.collectionType) {
+            setDiscoveredCollectionType(data.collectionType);
+          }
           if (Array.isArray(data.availableFields)) {
             data.availableFields.forEach((f: any) => { if (typeof f === 'string' && f.trim()) discovered.add(f.trim()); });
           }
@@ -951,6 +1019,7 @@ export function ExecutionPreflightModal({
                       setLoopStepIndex(idx);
                       if (idx < startStepIndex) setStartStepIndex(idx);
                       if (idx > endStepIndex) setEndStepIndex(idx);
+                      handleRefreshFields(workflow, idx);
                     }}
                     className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
                   >
@@ -1045,6 +1114,103 @@ export function ExecutionPreflightModal({
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Discovered Records Preview */}
+              <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-cyan-400" />
+                    <span className="text-xs font-semibold text-white">Discovered Records Preview</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-950 text-cyan-300 border border-cyan-800/60 uppercase">
+                      {discoveredCollectionType}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-cyan-400 font-mono">
+                      {discoveredItemCount > 0 ? `${discoveredItemCount} record${discoveredItemCount === 1 ? '' : 's'} discovered` : 'Live DOM verification'}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={scanningColumns}
+                      onClick={() => handleRefreshFields(workflow, anchorStepIndex)}
+                      className="p-1 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 rounded transition cursor-pointer"
+                      title="Rescan Records from Active Browser Tab"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${scanningColumns ? 'animate-spin text-cyan-400' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {discoveredRecords.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-800/80 bg-slate-900/60 divide-y divide-slate-800/60 text-xs">
+                      {discoveredRecords.slice(0, 5).map((rec, idx) => {
+                        const recFields = rec.fields || {};
+                        const filterCheck = filterEnabled && conditions.length > 0
+                          ? doesRecordMatchFilter(recFields, conditions, matchMode)
+                          : { matches: true };
+                        const displayId = rec.id || recFields['Invoice Number'] || recFields['Invoice No'] || recFields['Invoice #'] || recFields['ID'] || `Record #${idx + 1}`;
+                        
+                        return (
+                          <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/30 transition">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="text-[10px] text-slate-500 font-mono shrink-0">#{idx + 1}</span>
+                              <span className="font-semibold text-slate-200 truncate">{displayId}</span>
+                              {recFields['Status'] && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300 shrink-0">
+                                  {recFields['Status']}
+                                </span>
+                              )}
+                              {recFields['Date'] && (
+                                <span className="text-[11px] text-slate-400 shrink-0">{recFields['Date']}</span>
+                              )}
+                              {recFields['Amount'] && (
+                                <span className="text-[11px] text-emerald-400 shrink-0 font-mono">{recFields['Amount']}</span>
+                              )}
+                            </div>
+                            <div className="shrink-0">
+                              {filterEnabled ? (
+                                filterCheck.matches ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                                    ✓ Matches
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
+                                    ⊘ Excluded
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-[10px] text-cyan-400/80 font-mono">Will process</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {discoveredRecords.length > 5 && (
+                      <p className="text-[11px] text-slate-500 text-right">
+                        Showing 5 of {discoveredRecords.length} discovered items
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800/60 text-center text-xs text-slate-400">
+                    {scanningColumns ? (
+                      <div className="flex items-center justify-center gap-2 text-cyan-400">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Scanning active browser tab for repeating records...</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <p>No preview records captured yet.</p>
+                        <p className="text-[11px] text-slate-500">
+                          Anchor is set to <strong className="text-cyan-300 font-mono">Step #{anchorStepIndex + 1}</strong>. When connected to the desktop worker, click <button type="button" onClick={() => handleRefreshFields(workflow, anchorStepIndex)} className="text-cyan-400 hover:underline">Scan Records</button> to inspect live DOM rows.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Batch Iteration Limits */}
