@@ -139,7 +139,36 @@ class ItemDiscovery {
                 break;
               }
             } else {
-              const matches = Array.from(document.querySelectorAll(val)).filter(visible);
+              let matches = Array.from(document.querySelectorAll(val)).filter(visible);
+              // When multiple matches exist across different modal/dialog containers,
+              // prioritize the elements residing in the topmost active modal
+              if (matches.length > 1) {
+                const getZ = (el) => {
+                  const cs = window.getComputedStyle(el);
+                  const z = parseInt(cs.zIndex, 10);
+                  return isNaN(z) ? 0 : z;
+                };
+                const modalSelectors = [
+                  '.x-window:not(.x-hidden):not(.x-hidden-offsets)',
+                  '[role="dialog"]:not([aria-hidden="true"])',
+                  'dialog[open]',
+                  '.modal.show',
+                  '.modal.in',
+                  '.modal:not([aria-hidden="true"])',
+                  '.ui-dialog:not([style*="display: none"])',
+                  '.dx-dialog',
+                  '.ant-modal:not(.ant-modal-hidden)'
+                ];
+                const allModals = Array.from(document.querySelectorAll(modalSelectors.join(', '))).filter(visible);
+                if (allModals.length > 0) {
+                  allModals.sort((a, b) => getZ(b) - getZ(a));
+                  const topModal = allModals[0];
+                  const inTopModal = matches.filter(el => topModal.contains(el));
+                  if (inTopModal.length > 0) {
+                    matches = inTopModal;
+                  }
+                }
+              }
               const nonNav = matches.find(el => !isNavOrChrome(el));
               if (nonNav) {
                 recorded = nonNav;
@@ -764,11 +793,14 @@ class ItemDiscovery {
 
     return page.evaluateHandle(({ collection, index, expectedItem }) => {
       const visible = (el) => {
-        if (!el || !(el instanceof Element)) return false;
-        const style = getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
+        if (!el) return false;
+        if (typeof Element !== 'undefined' && !(el instanceof Element)) return false;
+        const style = (typeof getComputedStyle === 'function' ? getComputedStyle(el) : el.style) || {};
+        const rect = (typeof el.getBoundingClientRect === 'function') ? el.getBoundingClientRect() : { width: 10, height: 10, top: 0, left: 0 };
+        const top = rect.top !== undefined ? rect.top : 0;
+        const left = rect.left !== undefined ? rect.left : 0;
         return style.display !== 'none' && style.visibility !== 'hidden' &&
-          rect.width > 0 && rect.height > 0 && rect.top > -500 && rect.left > -500;
+          rect.width > 0 && rect.height > 0 && top > -500 && left > -500;
       };
 
       const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -791,7 +823,8 @@ class ItemDiscovery {
         (Array.isArray(collection.headerColumns) && collection.headerColumns.length > 0);
 
       const isHeaderItem = (el) => {
-        if (!el || !(el instanceof Element)) return false;
+        if (!el) return false;
+        if (typeof Element !== 'undefined' && !(el instanceof Element)) return false;
         if (!isTableRowCollection) return false;
         const tag = el.tagName.toLowerCase();
         if (tag === 'thead' || el.closest('thead')) return true;
@@ -841,6 +874,36 @@ class ItemDiscovery {
       }
       if (!ancestors.length && collection.ancestorTag) {
         ancestors = Array.from(document.querySelectorAll(collection.ancestorTag)).filter(visible);
+      }
+
+      // If multiple ancestor containers exist (e.g. across multiple stacked windows or modals),
+      // prioritize the ancestor residing inside the topmost active modal/window!
+      if (ancestors.length > 1) {
+        const getZ = (el) => {
+          const cs = window.getComputedStyle(el);
+          const z = parseInt(cs.zIndex, 10);
+          return isNaN(z) ? 0 : z;
+        };
+        const modalSelectors = [
+          '.x-window:not(.x-hidden):not(.x-hidden-offsets)',
+          '[role="dialog"]:not([aria-hidden="true"])',
+          'dialog[open]',
+          '.modal.show',
+          '.modal.in',
+          '.modal:not([aria-hidden="true"])',
+          '.ui-dialog:not([style*="display: none"])',
+          '.dx-dialog',
+          '.ant-modal:not(.ant-modal-hidden)'
+        ];
+        const allModals = Array.from(document.querySelectorAll(modalSelectors.join(', '))).filter(visible);
+        if (allModals.length > 0) {
+          allModals.sort((a, b) => getZ(b) - getZ(a));
+          const topModal = allModals[0];
+          const inTopModal = ancestors.filter(a => topModal.contains(a));
+          if (inTopModal.length > 0) {
+            ancestors = inTopModal;
+          }
+        }
       }
 
       for (const ancestor of ancestors) {

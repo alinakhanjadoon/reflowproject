@@ -1072,6 +1072,17 @@ class LoopReplayRunner {
           await this.ensureDropdownOpen(page, triggerStep);
           await new Promise(r => setTimeout(r, 400));
         }
+
+        // Natural pacing delay after setup steps and deduplicate any duplicate floating windows
+        await new Promise(r => setTimeout(r, 400));
+        if (typeof this.replayEngine?.interruptionHandler?.closeDuplicateWindows === 'function') {
+          await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
+        }
+      }
+
+      // Ensure duplicate / stacked windows are deduplicated before discovery
+      if (typeof this.replayEngine?.interruptionHandler?.closeDuplicateWindows === 'function') {
+        await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
       }
 
       // Discover collection targeting the explicit anchor step

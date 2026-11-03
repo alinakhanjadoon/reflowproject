@@ -512,11 +512,11 @@ async function executeClick(elementHandle, action, options = {}) {
 
   // Supplementary / Hybrid DOM Event Dispatch:
   // If coordinate click was obscured (e.g. by transparent ripple or container),
-  // OR if targeting an interactive button/link/export control, dispatch full synthetic DOM sequence
-  // directly on the element so framework event listeners (Angular, React, Vue) receive the event reliably.
-  // CRITICAL: Do NOT execute secondary clicks if element is a checkbox or a download action and was already clicked!
+  // dispatch full synthetic DOM sequence directly on the element so framework event listeners receive the event reliably.
+  // CRITICAL: Do NOT execute secondary clicks if element was ALREADY clicked directly by native CDP!
+  // Redundant secondary clicks cause legacy portals to register duplicate clicks and open multiple identical windows.
   const isCheckboxControl = Boolean(checkboxStatus && checkboxStatus.isCheckbox);
-  if (!clicked || (!isCheckboxControl && !isLikelyDownloadOrExport && (!hitMeta.isDirectHit || hitMeta.isInteractive))) {
+  if (!clicked || (!isCheckboxControl && !isLikelyDownloadOrExport && !hitMeta.isDirectHit)) {
     try {
       await clickTarget.evaluate((el, alreadyClicked) => {
         try { el.focus?.(); } catch {}

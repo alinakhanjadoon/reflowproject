@@ -757,6 +757,203 @@ class InterruptionHandler {
     }
   }
 
+  /**
+   * Detect and close duplicate floating / modal windows on the page,
+   * keeping only the single topmost active window.
+   * If an ERP / legacy portal opened 3-4 identical windows, this closes the background
+   * duplicates so the user and the loop system only have the single active window.
+   *
+   * @param {import('puppeteer-core').Page} page
+   * @returns {Promise<{ closedCount: number, keptTitle: string | null }>}
+   */
+  async closeDuplicateWindows(page) {
+    if (!page || typeof page.evaluate !== 'function') return { closedCount: 0, keptTitle: null };
+
+    try {
+      const result = await page.evaluate(() => {
+        const isVisible = (el) => {
+          if (!el) return false;
+          if (typeof Element !== 'undefined' && !(el instanceof Element)) return false;
+          const style = (window.getComputedStyle ? window.getComputedStyle(el) : el.style) || {};
+          const rect = (typeof el.getBoundingClientRect === 'function') ? el.getBoundingClientRect() : { width: 500, height: 400 };
+          return style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            parseFloat(style.opacity || '1') > 0.05 &&
+            rect.width > 80 &&
+            rect.height > 60;
+        };
+
+        const getZIndex = (el) => {
+          const cs = window.getComputedStyle(el);
+          const z = parseInt(cs.zIndex, 10);
+          return isNaN(z) ? 0 : z;
+        };
+
+        const windowSelectors = [
+          '.x-window:not(.x-hidden):not(.x-hidden-offsets):not(.x-window-minimized)',
+          '[role="dialog"]:not([aria-hidden="true"])',
+          '[role="alertdialog"]:not([aria-hidden="true"])',
+          'dialog[open]',
+          '.modal.show',
+          '.modal.in',
+          '.modal:not([aria-hidden="true"])',
+          '.ui-dialog:not([style*="display: none"])',
+          '.dx-dialog',
+          '.ant-modal:not(.ant-modal-hidden)',
+          '.MuiDialog-root',
+          '.chakra-modal__content'
+        ];
+
+        const allWindows = [];
+        for (const sel of windowSelectors) {
+          try {
+            const found = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+            for (const w of found) {
+              if (!allWindows.some(existing => existing === w || (w.id && existing.id === w.id))) {
+                allWindows.push(w);
+              }
+            }
+          } catch {}
+        }
+
+        // Check for custom fixed/absolute floating containers with header/title controls
+        try {
+          const floaters = Array.from(document.querySelectorAll('div, section, aside')).filter(el => {
+            if (!isVisible(el) || allWindows.includes(el)) return false;
+            const cs = window.getComputedStyle(el);
+            if (cs.position !== 'absolute' && cs.position !== 'fixed') return false;
+            const z = parseInt(cs.zIndex, 10);
+            if (isNaN(z) || z < 10) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width >= 280 && rect.height >= 180 &&
+              Boolean(el.querySelector('[class*="header" i], [class*="title" i], [class*="close" i], button, .x-tool'));
+          });
+          for (const f of floaters) {
+            if (!allWindows.some(existing => existing === f || (f.id && existing.id === f.id))) {
+              allWindows.push(f);
+            }
+          }
+        } catch {}
+
+        if (allWindows.length <= 1) return { closedCount: 0, keptTitle: null };
+
+        const getWindowTitle = (w) => {
+          const titleEl = w.querySelector(
+            '.x-window-header-text, .x-title-text, .x-window-header, .modal-title, .ui-dialog-title, [class*="title" i], [class*="header" i], h1, h2, h3, h4, [role="heading"]'
+          );
+          let text = (titleEl ? titleEl.textContent : w.textContent.slice(0, 120)) || '';
+          return text.toLowerCase().replace(/\b(close|dismiss|minimize|maximize|restore)\b/gi, '').replace(/\s+/g, ' ').trim();
+        };
+
+        const groups = new Map();
+        for (const w of allWindows) {
+          const title = getWindowTitle(w);
+          if (!title || title.length < 3) continue;
+          if (!groups.has(title)) groups.set(title, []);
+          groups.get(title).push(w);
+        }
+
+        let closedCount = 0;
+        let keptTitle = null;
+
+        for (const [title, wins] of groups.entries()) {
+          if (wins.length <= 1) continue;
+
+          // Highest z-index is the active front-most window
+          wins.sort((a, b) => {
+            const za = getZIndex(a);
+            const zb = getZIndex(b);
+            if (za !== zb) return zb - za;
+            if (typeof a.compareDocumentPosition === 'function') {
+              return (a.compareDocumentPosition(b) & 4) ? -1 : 1;
+            }
+            return 0;
+          });
+
+          keptTitle = title;
+          const duplicatesToClose = wins.slice(1);
+
+          for (const dup of duplicatesToClose) {
+            let dismissed = false;
+
+            // 1. Try finding and clicking close button inside duplicate window
+            const candidateButtons = Array.from(dup.querySelectorAll(
+              'button, a, [role="button"], .x-tool, .close, .btn-close, .modal-close, span, div'
+            )).filter(btn => {
+              if (!isVisible(btn)) return false;
+              const text = (btn.textContent || btn.value || '').trim();
+              const aria = (btn.getAttribute('aria-label') || '').trim();
+              const bTitle = (btn.getAttribute('title') || '').trim();
+              const cls = (typeof btn.className === 'string' ? btn.className : '').trim();
+              return /^(close|dismiss|exit|cancel|[×✕✖✗✘⨯xX+])$/i.test(text) ||
+                /close|dismiss/i.test(aria) ||
+                /close|dismiss/i.test(bTitle) ||
+                /x-tool-close|btn-close|modal-close|close/i.test(cls);
+            });
+
+            if (candidateButtons.length > 0) {
+              try {
+                const btn = candidateButtons[0];
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                btn.click?.();
+                dismissed = true;
+              } catch {}
+            }
+
+            // 2. ExtJS native component destroy fallback
+            if (!dismissed) {
+              try {
+                if (typeof window.Ext !== 'undefined' && window.Ext.getCmp) {
+                  const cmp = window.Ext.getCmp(dup.id);
+                  if (cmp && typeof cmp.close === 'function') {
+                    cmp.close();
+                    dismissed = true;
+                  } else if (cmp && typeof cmp.destroy === 'function') {
+                    cmp.destroy();
+                    dismissed = true;
+                  }
+                }
+              } catch {}
+            }
+
+            // 3. Fallback: hide/remove DOM element so it no longer interferes
+            const isStillInBody = Boolean(typeof document !== 'undefined' && document.body && typeof document.body.contains === 'function' && document.body.contains(dup));
+            if (!dismissed || isStillInBody) {
+              if (dup.style) {
+                dup.style.display = 'none';
+                dup.style.visibility = 'hidden';
+              }
+              if (typeof dup.setAttribute === 'function') {
+                dup.setAttribute('aria-hidden', 'true');
+              }
+              if (dup.classList && typeof dup.classList.add === 'function') {
+                dup.classList.add('x-hidden', 'x-hidden-offsets');
+              }
+              if (typeof dup.remove === 'function') {
+                try { dup.remove(); } catch {}
+              }
+              dismissed = true;
+            }
+
+            if (dismissed) closedCount++;
+          }
+        }
+
+        return { closedCount, keptTitle };
+      });
+
+      if (result && result.closedCount > 0) {
+        logger.info(`[InterruptionHandler] Closed ${result.closedCount} duplicate "${result.keptTitle}" background window(s), keeping single active front-most window.`);
+      }
+
+      return result || { closedCount: 0, keptTitle: null };
+    } catch (err) {
+      logger.warn(`[InterruptionHandler] closeDuplicateWindows notice: ${err.message}`);
+      return { closedCount: 0, keptTitle: null };
+    }
+  }
+
   _recordInterruption(record) {
     this.interruptionHistory.unshift(record);
     if (this.interruptionHistory.length > this.maxHistory) {
