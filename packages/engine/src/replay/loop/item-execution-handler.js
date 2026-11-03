@@ -85,6 +85,116 @@ class ItemExecutionHandler {
   }
 
   /**
+   * Preserves and restores the collection view between loop items.
+   * Guarantees:
+   * 1. If collection is already present (same-page actions, direct in-row download), does not navigate or reload.
+   * 2. If detail-page navigation occurred, safely returns via history.back() or direct collection URL.
+   * 3. NEVER navigates to Home, and NEVER re-executes setup steps from step 0.
+   * 4. Waits for collection DOM container to settle with polling before continuing.
+   *
+   * @param {object} params
+   * @param {object} params.page - Puppeteer Page
+   * @param {object} params.discovery - ItemDiscovery result object
+   * @param {string} [params.collectionUrl] - The authoritative collection URL captured after setup
+   * @param {object} [params.runner] - LoopReplayRunner instance
+   * @returns {Promise<{ restored: boolean, method: string, reason?: string }>}
+   */
+  async restoreCollectionContext({ page, discovery, collectionUrl, runner }) {
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+      return { restored: false, reason: 'Page closed' };
+    }
+
+    const replayEngine = runner?.replayEngine || this.replayEngine;
+    if (replayEngine) {
+      await replayEngine.dismissOverlays().catch(() => {});
+      if (typeof replayEngine._waitForLoadingMasks === 'function') {
+        await replayEngine._waitForLoadingMasks(2500).catch(() => {});
+      }
+    } else if (page.keyboard) {
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+
+    const checkPresence = async () => {
+      if (runner && typeof runner.isCollectionPresent === 'function') {
+        return runner.isCollectionPresent(page, discovery);
+      }
+      return this.gridAdapter ? this.gridAdapter.isCollectionPresent(page, discovery) : true;
+    };
+
+    const waitForPresence = async (timeoutMs = 3000) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (await checkPresence()) return true;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return false;
+    };
+
+    // 1. Same-page check: Is the collection already present in the active DOM?
+    if (await checkPresence()) {
+      return { restored: true, method: 'already_present' };
+    }
+
+    // 2. Allow brief settle time in case table is rendering/updating
+    if (await waitForPresence(1200)) {
+      return { restored: true, method: 'settled' };
+    }
+
+    // 3. Detail-page navigation handling: URL changed or detail view opened
+    const currentUrl = page.url() || '';
+    const isDifferentUrl = collectionUrl && currentUrl !== collectionUrl;
+
+    if (isDifferentUrl && typeof page.goBack === 'function') {
+      try {
+        logger.info(`[Loop Runner] Detail page navigation detected ("${currentUrl}" !== "${collectionUrl}"). Restoring collection view via history.back...`);
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        if (replayEngine && typeof replayEngine.dismissOverlays === 'function') {
+          await replayEngine.dismissOverlays().catch(() => {});
+        }
+        if (await waitForPresence(3500)) {
+          logger.info(`[Loop Runner] Successfully restored collection view via browser back navigation.`);
+          return { restored: true, method: 'history_back' };
+        }
+      } catch (backErr) {
+        logger.warn(`[Loop Runner] History back navigation note: ${backErr.message}`);
+      }
+    }
+
+    // 4. Direct navigation to collectionUrl (preserves query params & filters)
+    if (collectionUrl) {
+      try {
+        const targetNavUrl = collectionUrl;
+        const nowUrl = page.url() || '';
+        if (nowUrl !== targetNavUrl) {
+          logger.info(`[Loop Runner] Restoring collection view by navigating to collection URL: ${targetNavUrl}`);
+          await page.goto(targetNavUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+          if (replayEngine && typeof replayEngine.dismissOverlays === 'function') {
+            await replayEngine.dismissOverlays().catch(() => {});
+          }
+          if (await waitForPresence(4000)) {
+            logger.info(`[Loop Runner] Successfully restored collection view at collection URL.`);
+            return { restored: true, method: 'collection_url' };
+          }
+        }
+      } catch (gotoErr) {
+        logger.warn(`[Loop Runner] Direct collection URL navigation note: ${gotoErr.message}`);
+      }
+    }
+
+    // 5. Final check
+    const finalPresence = await checkPresence();
+    if (finalPresence) {
+      return { restored: true, method: 'eventual_presence' };
+    }
+
+    // Never navigate to Home, and never re-execute setupSteps!
+    return {
+      restored: false,
+      reason: `Collection container not found at ${collectionUrl || currentUrl}. Stopped safely to avoid restarting workflow.`
+    };
+  }
+
+  /**
    * Determine whether an action can potentially initiate a download.
    * Recognizes explicit keywords, document/action column context, and unlabeled icon buttons.
    */
@@ -690,18 +800,23 @@ class ItemExecutionHandler {
     const evaluatedItems = [];
     for (const item of itemsData) {
       const fields = item.fields || {};
-      const invoiceNo = fields['Invoice Number'] || fields['Invoice No'] || fields['Invoice'] ||
-        (item.text && item.text.match(/\b((?:SI|INV|DR|TX|CM)-\d+(?:[-_]\w+)*|\b\d{5,10}\b)/i)?.[1]) || null;
+      const businessId = fields['Invoice ID'] || fields['INVOICE ID'] || fields['Invoice Number'] || fields['Invoice No'] || fields['Invoice'] ||
+        fields['Order ID'] || fields['Order Number'] || fields['Order No'] || fields['Order'] ||
+        fields['Transaction ID'] || fields['Tx ID'] || fields['Payment ID'] || fields['Payment No'] ||
+        fields['Ref No'] || fields['Reference No'] || fields['Voucher No'] || fields['Doc ID'] || fields['Document ID'] ||
+        fields['id'] || fields['ID'] ||
+        (item.text && item.text.match(/\b((?:SI|INV|DR|TX|CM|PO|ORD|REC|STMT)-\d+(?:[-_]\w+)*|\b\d{5,10}\b)/i)?.[1]) || null;
 
       let itemLabel = item.text || `Item #${item.index + 1}`;
-      if (invoiceNo) {
-        itemLabel = fields.Type ? `${invoiceNo} (${fields.Type})` : invoiceNo;
+      if (businessId) {
+        itemLabel = fields.Type ? `${businessId} (${fields.Type})` : businessId;
       }
+      const isInvoice = /^(?:INV|SI)\b/i.test(businessId || '') || Boolean(fields['Invoice ID'] || fields['INVOICE ID'] || fields['Invoice Number'] || fields['Invoice No'] || fields['Invoice']);
       const itemKey = isDropdown
         ? `dropdown:${itemLabel}`
-        : (invoiceNo ? `invoice:${invoiceNo}` : `item_${item.index + 1}`);
+        : (businessId ? (isInvoice ? `invoice:${businessId}` : `record:${businessId}`) : `item_${item.index + 1}`);
 
-      const itemIdentifier = { itemKey, itemLabel, invoiceNumber: invoiceNo };
+      const itemIdentifier = { itemKey, itemLabel, invoiceNumber: businessId, businessId };
 
       let matches = true;
       let reason = 'Matches condition';
@@ -745,6 +860,7 @@ class ItemExecutionHandler {
     triggerStep,
     partition,
     currentPageUrl,
+    collectionUrl,
     initialPageUrls,
     currentPage,
     manifest,
@@ -754,6 +870,7 @@ class ItemExecutionHandler {
     const replayEngine = runner?.replayEngine || this.replayEngine;
     const downloadsDir = runner?.downloadsDir || this.downloadManager?.downloadsDir;
     const maxRetries = Number.isInteger(runner?.maxItemRetries) ? runner.maxItemRetries : this.maxItemRetries;
+    const targetCollectionUrl = collectionUrl || currentPageUrl;
 
     const isCollectionPresent = async () => {
       if (runner && typeof runner.isCollectionPresent === 'function') {
@@ -837,34 +954,14 @@ class ItemExecutionHandler {
         await new Promise(r => setTimeout(r, 500));
 
         // Reacquire the live DOM item and resume at the failed action checkpoint.
-        const collectionStillPresent = await isCollectionPresent();
-
-        if (!collectionStillPresent) {
-          try {
-            const currentTabUrl = page.url() || '';
-            if (currentPageUrl && currentTabUrl !== currentPageUrl) {
-              await page.goto(currentPageUrl, { waitUntil: 'domcontentloaded' });
-              await new Promise(r => setTimeout(r, 1000));
-            }
-            const restored = await isCollectionPresent();
-            if (!restored && partition && partition.setupSteps && partition.setupSteps.length > 0) {
-              for (let s = 0; s < partition.setupSteps.length; s++) {
-                const step = partition.setupSteps[s];
-                const isLogin = isLoginAction(step);
-                if (!isLogin && replayEngine) {
-                  await replayEngine.executeAction(step, s).catch(() => { });
-                }
-              }
-            }
-          } catch (restoreErr) {
-            logger.warn('[Loop Runner] Could not restore list state before retry: ' + restoreErr.message);
-          }
-        }
-        if (replayEngine) {
-          await replayEngine.dismissOverlays().catch(() => {});
-          if (typeof replayEngine._waitForLoadingMasks === 'function') {
-            await replayEngine._waitForLoadingMasks(4000).catch(() => {});
-          }
+        const restoreRes = await this.restoreCollectionContext({
+          page,
+          discovery,
+          collectionUrl: targetCollectionUrl,
+          runner
+        });
+        if (!restoreRes.restored) {
+          logger.warn(`[Loop Runner] Collection view could not be restored before retry: ${restoreRes.reason}`);
         }
       }
 
@@ -896,6 +993,38 @@ class ItemExecutionHandler {
                 reason: condResult.reason || 'Step condition evaluated to false'
               };
               itemResult.actions.push(skippedResult);
+              nextActionOffset = actionOffset + 1;
+              writeLoopCheckpoint(manifest, itemResult.index, nextActionOffset, currentPage, i, itemResult);
+              continue;
+            }
+          }
+
+          const isDownloadAction = actionType === 'CLICK' && Boolean(downloadsDir) && ItemExecutionHandler.isDownloadPotentialAction(action, targetItem);
+          const forceRedownload = runner?.forceRedownload === true || this.forceRedownload === true;
+
+          // Deduplication: If this download action already succeeded for this record, do not re-download
+          if (isDownloadAction && !forceRedownload) {
+            const alreadyDownloaded = (runner && typeof runner.checkIfAlreadyDownloaded === 'function')
+              ? runner.checkIfAlreadyDownloaded(itemIdentifier.itemKey, itemIdentifier.invoiceNumber, targetItem.fields || {})
+              : (this.artifactDownloadManager?.checkIfAlreadyDownloaded
+                  ? this.artifactDownloadManager.checkIfAlreadyDownloaded(itemIdentifier.itemKey, itemIdentifier.invoiceNumber, targetItem.fields || {})
+                  : null);
+
+            const alreadyHaveItemFile = Array.isArray(itemResult.downloadedFiles) && itemResult.downloadedFiles.length > 0;
+
+            if (alreadyDownloaded?.isDuplicate) {
+              logger.info(`[Loop Runner] Skipping download action for item #${i + 1} ("${itemIdentifier.itemLabel}") - file already downloaded: "${alreadyDownloaded.record?.filename || 'existing artifact'}"`);
+              const skipDlResult = {
+                index: effectiveLoopStepIndex + actionOffset + 1,
+                type: actionType,
+                status: 'SKIPPED_DUPLICATE',
+                reason: alreadyDownloaded.inFolder ? 'Already exists in download folder' : 'Already recorded as downloaded',
+                downloadedFiles: alreadyDownloaded.record ? [alreadyDownloaded.record.filename] : []
+              };
+              itemResult.actions.push(skipDlResult);
+              if (alreadyDownloaded.record && !alreadyHaveItemFile) {
+                itemResult.downloadedFiles.push(alreadyDownloaded.record);
+              }
               nextActionOffset = actionOffset + 1;
               writeLoopCheckpoint(manifest, itemResult.index, nextActionOffset, currentPage, i, itemResult);
               continue;
@@ -937,8 +1066,16 @@ class ItemExecutionHandler {
                 );
               }
 
-              // If first item action, verify and enforce that only row i is selected
-              if (actionOffset === 0) {
+              // If first item action, verify and enforce that only row i is selected (for ERP grids without explicit checkbox steps)
+              const isCheckboxStep = Boolean(
+                action.isCheckbox ||
+                action.desiredState !== undefined ||
+                action.target?.fingerprint?.type === 'checkbox' ||
+                action.fingerprint?.type === 'checkbox' ||
+                (typeof action.target?.selector === 'string' && action.target.selector.includes('checkbox')) ||
+                action.target?.candidates?.some(c => typeof c?.value === 'string' && c.value.includes('checkbox'))
+              );
+              if (actionOffset === 0 && !isCheckboxStep) {
                 await enforceGridRowSingleSelection(i);
                 logger.info(`[Loop Runner] Item #${i + 1}/${discovery.itemCount}: Selected target row, previous grid selections cleared.`);
               }
@@ -962,15 +1099,34 @@ class ItemExecutionHandler {
           };
 
           if (actionType === 'CLICK' && downloadsDir) {
-            const isDownloadAction = ItemExecutionHandler.isDownloadPotentialAction(action, targetItem);
             const downloadWaitMs = isDownloadAction
               ? this.downloadTimeoutMs
               : this.defaultClickWaitMs;
             const downloaded = await waitForDownload(beforeActionFiles, downloadWaitMs);
             if (downloaded.length) {
               for (const dl of downloaded) {
+                if (dl.sizeBytes === 0 || dl.filename.endsWith('.crdownload') || dl.filename.endsWith('.tmp')) {
+                  continue;
+                }
                 const organized = processAndStoreDownload(dl.path, itemIdentifier.itemKey, itemIdentifier.itemLabel, targetItem.fields || {});
-                itemResult.downloadedFiles.push(organized || dl);
+                if (organized) {
+                  const alreadyPresent = itemResult.downloadedFiles.some(existing =>
+                    (existing.fileHash && existing.fileHash === organized.fileHash) ||
+                    existing.filename === organized.filename ||
+                    existing.targetFilename === organized.targetFilename
+                  );
+                  if (!alreadyPresent) {
+                    itemResult.downloadedFiles.push(organized);
+                  }
+                } else {
+                  itemResult.downloadedFiles.push(dl);
+                }
+                // Unlink temporary file from downloadsDir so late sweep does NOT re-process it
+                try {
+                  if (fs.existsSync(dl.path) && dl.path.startsWith(downloadsDir)) {
+                    fs.unlinkSync(dl.path);
+                  }
+                } catch {}
               }
               actionResult.downloadedFiles = itemResult.downloadedFiles.map(file => file.filename || file.targetFilename);
             }
@@ -998,17 +1154,35 @@ class ItemExecutionHandler {
         // Allow the complete per-item procedure to settle before restoring state.
         await new Promise(r => setTimeout(r, 800));
 
-        // Check if any download arrived for this item (e.g. late export/save response)
+        // Check if any late download arrived for this item (e.g. late export/save response)
         if (downloadsDir && fs.existsSync(downloadsDir)) {
           try {
             const pendingFiles = fs.readdirSync(downloadsDir)
-              .filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp'));
+              .filter(f => !f.endsWith('.crdownload') && !f.endsWith('.tmp') && !f.endsWith('.download'));
             for (const f of pendingFiles) {
               const rawPath = path.join(downloadsDir, f);
+              if (!fs.existsSync(rawPath)) continue;
+              const stats = fs.statSync(rawPath);
+              if (stats.size === 0) continue;
+
+              const alreadyProcessed = (itemResult.downloadedFiles || []).some(existing =>
+                existing.filename === f || existing.targetFilename === f || existing.originalFilename === f
+              );
+              if (alreadyProcessed) {
+                try { fs.unlinkSync(rawPath); } catch {}
+                continue;
+              }
+
               const organized = processAndStoreDownload(rawPath, itemIdentifier.itemKey, itemIdentifier.itemLabel, targetItem.fields || {});
               if (organized) {
                 itemResult.downloadedFiles = itemResult.downloadedFiles || [];
-                itemResult.downloadedFiles.push(organized);
+                const alreadyInItemHashed = itemResult.downloadedFiles.some(existing =>
+                  (existing.fileHash && existing.fileHash === organized.fileHash) ||
+                  existing.filename === organized.filename
+                );
+                if (!alreadyInItemHashed) {
+                  itemResult.downloadedFiles.push(organized);
+                }
                 try { fs.unlinkSync(rawPath); } catch {}
               }
             }
@@ -1037,35 +1211,19 @@ class ItemExecutionHandler {
           await page.bringToFront().catch(() => { });
         } catch { }
 
-        // Resilient state verification back to the item collection page
-        const collectionStillPresent = await isCollectionPresent();
-
-        if (!collectionStillPresent) {
-          logger.info('[Loop Runner] Collection view not present after item — restoring state to: ' + currentPageUrl);
-          const currentTabUrl = page.url() || '';
-          if (currentPageUrl && currentTabUrl !== currentPageUrl) {
-            await page.goto(currentPageUrl, { waitUntil: 'domcontentloaded' }).catch(() => { });
-            await new Promise(r => setTimeout(r, 1000));
-          }
-          const restored = await isCollectionPresent();
-          if (!restored && partition && partition.setupSteps && partition.setupSteps.length > 0) {
-            logger.info('[Loop Runner] Re-executing non-login setup navigation steps to restore collection view...');
-            for (let s = 0; s < partition.setupSteps.length; s++) {
-              const step = partition.setupSteps[s];
-              const isLogin = isLoginAction(step);
-              if (!isLogin && replayEngine) {
-                await replayEngine.executeAction(step, s).catch(() => { });
-              }
-            }
-          }
+        // Verify and restore collection view for the next item
+        const restoreRes = await this.restoreCollectionContext({
+          page,
+          discovery,
+          collectionUrl: targetCollectionUrl,
+          runner
+        });
+        if (!restoreRes.restored) {
+          logger.warn(`[Loop Runner] Collection view not present after item #${i + 1} (${restoreRes.reason})`);
+          itemResult.collectionRestorationFailed = true;
+          itemResult.collectionRestorationReason = restoreRes.reason;
         } else {
-          // Dismiss any open dropdown, context menu, or overlay backdrop (e.g. cdk-overlay-backdrop)
-          if (replayEngine) {
-            await replayEngine.dismissOverlays().catch(() => {});
-            if (typeof replayEngine._waitForLoadingMasks === 'function') {
-              await replayEngine._waitForLoadingMasks(4000).catch(() => {});
-            }
-          }
+          logger.info(`[ITEM ${i + 1}] Collection view preserved (${restoreRes.method}). Ready for next item.`);
         }
 
         // Ensure the collection list container is present on the page before next item
@@ -1319,25 +1477,12 @@ class ItemExecutionHandler {
         } else if (page.keyboard) {
           await page.keyboard.press('Escape').catch(() => { });
         }
-        const isCollectionPresent = async () => {
-          if (runner && typeof runner.isCollectionPresent === 'function') {
-            return runner.isCollectionPresent(page, discovery);
-          }
-          return this.gridAdapter ? this.gridAdapter.isCollectionPresent(page, discovery) : true;
-        };
-        const collectionStillPresent = await isCollectionPresent();
-        if (!collectionStillPresent && page.url() !== currentPageUrl) {
-          await page.goto(currentPageUrl, { waitUntil: 'domcontentloaded' }).catch(() => { });
-          if (partition && partition.setupSteps && partition.setupSteps.length > 0 && replayEngine) {
-            for (let s = 0; s < partition.setupSteps.length; s++) {
-              await replayEngine.executeAction(partition.setupSteps[s], s).catch(() => { });
-            }
-          }
-        } else if (!collectionStillPresent && partition && partition.setupSteps && partition.setupSteps.length > 0 && replayEngine) {
-          for (let s = 0; s < partition.setupSteps.length; s++) {
-            await replayEngine.executeAction(partition.setupSteps[s], s).catch(() => { });
-          }
-        }
+        await this.restoreCollectionContext({
+          page,
+          discovery,
+          collectionUrl: targetCollectionUrl,
+          runner
+        });
       } catch {
         // Ignore recovery error
       }
@@ -1433,28 +1578,8 @@ class ItemExecutionHandler {
       await new Promise(r => setTimeout(r, 400));
     }
 
-    let discovery = await ItemDiscovery.discover(page, targetStep.target || targetStep.fingerprint, { minItems: 2, minScore: 0.55 }).catch(() => ({ success: false }));
-    if (!discovery.success || discovery.itemCount < 2) {
-      if (partition.setupSteps.length > 0) {
-        const setupLoginSeq = detectLoginSequence(partition.setupSteps);
-        const isSessionAuth = setupLoginSeq.hasLoginSequence ? await isSessionAuthenticated(page, setupLoginSeq) : false;
-        for (let i = 0; i < partition.setupSteps.length; i++) {
-          if (isSessionAuth && i <= setupLoginSeq.endIndex) continue;
-          if (replayEngine) await replayEngine.executeAction(partition.setupSteps[i], i);
-        }
-        if (isDropdownCandidate) {
-          if (runner && typeof runner.ensureDropdownOpen === 'function') {
-            await runner.ensureDropdownOpen(page, triggerStep);
-          } else if (this.gridAdapter) {
-            await this.gridAdapter.ensureDropdownOpen(page, triggerStep, replayEngine);
-          }
-          await new Promise(r => setTimeout(r, 400));
-        }
-        discovery = await ItemDiscovery.discover(page, targetStep.target || targetStep.fingerprint, { minItems: 2, minScore: 0.55 });
-      }
-    }
-
-    if (!discovery.success || discovery.itemCount < 2) return { fallbackToStandard: true };
+    let discovery = await ItemDiscovery.discover(page, targetStep.target || targetStep.fingerprint, { minItems: 1, minScore: 0.45 }).catch(() => ({ success: false }));
+    if (!discovery.success || discovery.itemCount < 1) return { fallbackToStandard: true };
     if (!checkpoint) { manifest.itemsTotal = discovery.itemCount; manifest.pagesProcessed = 1; }
 
     const isDropdown = (runner && typeof runner.isDropdownOptionCollection === 'function')

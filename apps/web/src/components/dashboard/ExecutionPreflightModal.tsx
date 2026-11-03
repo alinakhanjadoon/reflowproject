@@ -123,13 +123,17 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
   if (!workflow) return ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'];
   const fields = new Set<string>();
 
+  const IGNORED_COLUMN_NAMES = /^(select|selection|checkbox|actions?|operations?|manage|controls?|tools?|_cells|_rawtext|text|label|fulltext)$/i;
+
   const addCleanCol = (raw: unknown) => {
     if (typeof raw !== 'string') return;
     let str = raw.trim();
     if (!str || str.length > 50 || str.startsWith('{') || str.startsWith('<')) return;
     if (EXPANDER_GLYPH_REGEX.test(str)) return;
+    if (IGNORED_COLUMN_NAMES.test(str)) return;
     str = str.replace(/^(click|select|enter|type|open|download|view|press)\s+/i, '').trim();
     if (!str || str.length > 50) return;
+    if (IGNORED_COLUMN_NAMES.test(str)) return;
     fields.add(str);
   };
 

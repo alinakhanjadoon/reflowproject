@@ -134,9 +134,16 @@
       return el;
     }
 
+    // Elevate label clicking directly to inner checkbox/radio if present
+    const labelParent = tag === 'label' ? el : el.closest?.('label');
+    if (labelParent) {
+      const innerInput = labelParent.querySelector?.('input[type="checkbox"], input[type="radio"]');
+      if (innerInput) return innerInput;
+    }
+
     // Preserve backdrop overlay dismiss clicks
     if ((el.classList && (el.classList.contains('cdk-overlay-backdrop') || el.classList.contains('modal-backdrop'))) ||
-        (el.className && typeof el.className === 'string' && el.className.includes('backdrop'))) {
+      (el.className && typeof el.className === 'string' && el.className.includes('backdrop'))) {
       return el;
     }
 
@@ -536,7 +543,7 @@
           try {
             const lbl = document.querySelector(`label[for="${safeCssEscape(selectEl.id)}"]`);
             if (lbl) fieldName = cleanSniffedText(lbl.innerText || lbl.textContent || '');
-          } catch {}
+          } catch { }
         }
         if (!fieldName) {
           fieldName = cleanSniffedText(selectEl.closest?.('label')?.innerText || selectEl.name || selectEl.id || selectEl.getAttribute?.('placeholder') || '');
@@ -566,13 +573,13 @@
           try {
             const lbl = document.getElementById(listbox.getAttribute('aria-labelledby'));
             if (lbl) fieldCandidate = cleanSniffedText(lbl.innerText || lbl.textContent || '');
-          } catch {}
+          } catch { }
         }
         if (!fieldCandidate && listbox?.id) {
           try {
             const trigger = document.querySelector(`[aria-controls="${safeCssEscape(listbox.id)}"], [aria-owns="${safeCssEscape(listbox.id)}"]`);
             if (trigger) fieldCandidate = cleanSniffedText(trigger.getAttribute('aria-label') || trigger.innerText || trigger.textContent || '');
-          } catch {}
+          } catch { }
         }
         if (!fieldCandidate) {
           fieldCandidate = cleanSniffedText(
@@ -594,7 +601,7 @@
           let openMenu = null;
           const ctrlId = isCombobox.getAttribute?.('aria-controls') || isCombobox.getAttribute?.('aria-owns');
           if (ctrlId) {
-            try { openMenu = document.getElementById(ctrlId); } catch {}
+            try { openMenu = document.getElementById(ctrlId); } catch { }
           }
           if (!openMenu) {
             openMenu = isCombobox.parentElement?.querySelector?.('.dropdown-menu, [role="listbox"], [role="menu"]') ||
@@ -633,7 +640,7 @@
         const name = element.getAttribute?.('name');
         let groupItems = [];
         if (name) {
-          try { groupItems = Array.from(document.querySelectorAll(`input[name="${safeCssEscape(name)}"]`)); } catch {}
+          try { groupItems = Array.from(document.querySelectorAll(`input[name="${safeCssEscape(name)}"]`)); } catch { }
         }
         if (groupItems.length === 0) {
           const fieldset = element.closest?.('fieldset, [role="radiogroup"], [role="group"]');
@@ -697,7 +704,7 @@
       let sniffedContext = null;
       try {
         sniffedContext = sniffElementContext(targetElement);
-      } catch {}
+      } catch { }
 
       let target = null;
       if (window.SelectorResolver && typeof window.SelectorResolver.captureTarget === 'function') {
@@ -822,7 +829,7 @@
     if (!element || element.tagName !== 'INPUT') return false;
     const type = (element.type || '').toLowerCase();
     if (type === 'password') {
-      try { element.dataset.wfIsPassword = 'true'; } catch {}
+      try { element.dataset.wfIsPassword = 'true'; } catch { }
       return true;
     }
     if (element.dataset && element.dataset.wfIsPassword === 'true') {
@@ -832,7 +839,7 @@
     const id = (element.id || '').toLowerCase();
     const autocomplete = (element.getAttribute?.('autocomplete') || '').toLowerCase();
     if (/pass(word)?/i.test(name) || /pass(word)?/i.test(id) || /current-password|new-password/i.test(autocomplete)) {
-      try { element.dataset.wfIsPassword = 'true'; } catch {}
+      try { element.dataset.wfIsPassword = 'true'; } catch { }
       return true;
     }
     return false;
@@ -937,6 +944,8 @@
     if (isPaused || isRecorderUiEvent(event)) return;
     const target = event.target;
     if (!target || !['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+    const inputType = (target.type || '').toLowerCase();
+    if (['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file'].includes(inputType)) return;
 
     const isPassword = isPasswordField(target);
     const currentValue = target.value || '';
@@ -1025,7 +1034,7 @@
         if (window.SelectorResolver && typeof window.SelectorResolver.captureTarget === 'function') {
           try {
             target = window.SelectorResolver.captureTarget(targetElement);
-          } catch {}
+          } catch { }
         }
         if (!target || !target.candidates || target.candidates.length === 0) {
           target = buildFallbackTarget(targetElement);
@@ -1070,7 +1079,7 @@
         const msgStr = '__WORKFLOW_CAPTURE_ACTION__:' + JSON.stringify(payload);
         console.debug(msgStr);
         console.info(msgStr);
-      } catch {}
+      } catch { }
 
       if (typeof window.__workflowCaptureEmitAction === 'function') {
         window.__workflowCaptureEmitAction(payload);
@@ -1128,8 +1137,8 @@
           const currentY = Math.round(scrollTarget.scrollTop || 0);
 
           if (lastEmittedScroll.target === scrollTarget &&
-              Math.abs(currentX - lastEmittedScroll.x) < 50 &&
-              Math.abs(currentY - lastEmittedScroll.y) < 50) {
+            Math.abs(currentX - lastEmittedScroll.x) < 50 &&
+            Math.abs(currentY - lastEmittedScroll.y) < 50) {
             return;
           }
 
@@ -1154,23 +1163,43 @@
   function detectCheckbox(element) {
     if (!element || element.nodeType !== 1) return null;
 
-    if (element.tagName === 'INPUT' && (element.type || '').toLowerCase() === 'checkbox') {
+    if (element.tagName === 'INPUT' && ['checkbox', 'radio'].includes((element.type || '').toLowerCase())) {
       return { element, input: element };
     }
-    if (element.getAttribute?.('role') === 'checkbox' || element.hasAttribute?.('aria-checked')) {
-      return { element, input: null };
+    const role = (element.getAttribute?.('role') || '').toLowerCase();
+    if (role === 'checkbox' || role === 'switch' || element.hasAttribute?.('aria-checked') || element.hasAttribute?.('aria-pressed')) {
+      const childInput = element.querySelector?.('input[type="checkbox"], input[type="radio"]');
+      return { element, input: childInput || null };
     }
     if (element.tagName === 'MAT-PSEUDO-CHECKBOX' || (element.classList && element.classList.contains('mat-pseudo-checkbox'))) {
       return { element, input: null };
     }
 
-    const container = element.closest?.('mat-checkbox, dx-check-box, [role="checkbox"], label, .mat-mdc-checkbox, .dx-checkbox');
+    // Check parent label or label associated via `for` / `htmlFor`
+    if (element.tagName === 'LABEL' || element.closest?.('label')) {
+      const lbl = element.tagName === 'LABEL' ? element : element.closest('label');
+      const forId = lbl.htmlFor || lbl.getAttribute?.('for');
+      if (forId) {
+        try {
+          const forInput = document.getElementById(forId);
+          if (forInput && forInput.tagName === 'INPUT' && ['checkbox', 'radio'].includes((forInput.type || '').toLowerCase())) {
+            return { element: lbl, input: forInput };
+          }
+        } catch {}
+      }
+      const innerInput = lbl.querySelector?.('input[type="checkbox"], input[type="radio"]');
+      if (innerInput) {
+        return { element: lbl, input: innerInput };
+      }
+    }
+
+    const container = element.closest?.('mat-checkbox, dx-check-box, [role="checkbox"], [role="switch"], .mat-mdc-checkbox, .dx-checkbox, .ant-checkbox-wrapper, .ant-checkbox');
     if (container) {
-      const innerInput = container.querySelector?.('input[type="checkbox"]');
+      const innerInput = container.querySelector?.('input[type="checkbox"], input[type="radio"]');
       return { element: container, input: innerInput };
     }
 
-    const childInput = element.querySelector?.('input[type="checkbox"]');
+    const childInput = element.querySelector?.('input[type="checkbox"], input[type="radio"]');
     if (childInput) {
       return { element, input: childInput };
     }
@@ -1182,6 +1211,11 @@
       if (innerCb || optionContainer.classList?.contains('mat-mdc-option-multiple') || optionContainer.getAttribute?.('aria-selected') !== null) {
         return { element: optionContainer, input: innerCb };
       }
+    }
+
+    // Modern component data attributes (Radix UI, shadcn, Mantine)
+    if (element.hasAttribute?.('data-state') || element.hasAttribute?.('data-checked')) {
+      return { element, input: null };
     }
 
     return null;
@@ -1210,9 +1244,9 @@
       }
       if (opt.classList) {
         if (opt.classList.contains('mat-mdc-option-selected') ||
-            opt.classList.contains('mat-option-selected') ||
-            opt.classList.contains('selected') ||
-            opt.classList.contains('is-selected')) {
+          opt.classList.contains('mat-option-selected') ||
+          opt.classList.contains('selected') ||
+          opt.classList.contains('is-selected')) {
           return true;
         }
       }
@@ -1222,28 +1256,49 @@
     }
 
     const aria = element.getAttribute?.('aria-checked') ??
-                 element.querySelector?.('[aria-checked]')?.getAttribute?.('aria-checked') ??
-                 element.closest?.('[aria-checked]')?.getAttribute?.('aria-checked');
+      element.querySelector?.('[aria-checked]')?.getAttribute?.('aria-checked') ??
+      element.closest?.('[aria-checked]')?.getAttribute?.('aria-checked');
     if (aria !== null && aria !== undefined) {
       return aria === 'true';
     }
 
-    const matCb = element.closest?.('mat-checkbox, .mat-mdc-checkbox, dx-check-box');
+    const pressed = element.getAttribute?.('aria-pressed') ??
+      element.querySelector?.('[aria-pressed]')?.getAttribute?.('aria-pressed');
+    if (pressed !== null && pressed !== undefined) {
+      return pressed === 'true';
+    }
+
+    const dataState = element.getAttribute?.('data-state') ??
+      element.querySelector?.('[data-state]')?.getAttribute?.('data-state') ??
+      element.closest?.('[data-state]')?.getAttribute?.('data-state');
+    if (dataState === 'checked' || dataState === 'on') return true;
+    if (dataState === 'unchecked' || dataState === 'off') return false;
+
+    const dataChecked = element.getAttribute?.('data-checked') ??
+      element.querySelector?.('[data-checked]')?.getAttribute?.('data-checked') ??
+      element.closest?.('[data-checked]')?.getAttribute?.('data-checked');
+    if (dataChecked === 'true' || dataChecked === '') return true;
+    if (dataChecked === 'false') return false;
+
+    const matCb = element.closest?.('mat-checkbox, .mat-mdc-checkbox, dx-check-box, .ant-checkbox-wrapper, .ant-checkbox');
     if (matCb && matCb.classList) {
       if (matCb.classList.contains('mat-mdc-checkbox-checked') ||
-          matCb.classList.contains('mat-checkbox-checked') ||
-          matCb.classList.contains('dx-checkbox-checked')) {
+        matCb.classList.contains('mat-checkbox-checked') ||
+        matCb.classList.contains('dx-checkbox-checked') ||
+        matCb.classList.contains('ant-checkbox-checked') ||
+        matCb.classList.contains('ant-checkbox-wrapper-checked')) {
         return true;
       }
     }
 
     if (element.classList) {
       if (element.classList.contains('mat-mdc-checkbox-checked') ||
-          element.classList.contains('mat-checkbox-checked') ||
-          element.classList.contains('dx-checkbox-checked') ||
-          element.classList.contains('mat-pseudo-checkbox-checked') ||
-          element.classList.contains('checked') ||
-          element.classList.contains('is-checked')) {
+        element.classList.contains('mat-checkbox-checked') ||
+        element.classList.contains('dx-checkbox-checked') ||
+        element.classList.contains('ant-checkbox-checked') ||
+        element.classList.contains('mat-pseudo-checkbox-checked') ||
+        element.classList.contains('checked') ||
+        element.classList.contains('is-checked')) {
         return true;
       }
     }
@@ -1278,13 +1333,21 @@
           selectedIndex: target.selectedIndex
         }
       });
-    } else if (target.tagName === 'INPUT' && (target.type || '').toLowerCase() === 'checkbox') {
+    } else if (target.tagName === 'INPUT' && ['checkbox', 'radio'].includes((target.type || '').toLowerCase())) {
+      const now = Date.now();
       const isChecked = Boolean(target.checked);
+      if (lastHandledTarget && isSameTarget(lastHandledTarget, target) && target._lastEmittedChecked === isChecked && (now - lastHandledEventTime) < 300) {
+        return;
+      }
+      target._lastEmittedChecked = isChecked;
+      lastHandledEventTime = now;
+      lastHandledTarget = target;
       emitAction('CLICK', target, {
         isCheckbox: true,
         captureTimestamp,
         desiredState: isChecked,
         checked: isChecked,
+        ...(isChecked === false ? { isUncheck: true } : {}),
         meta: {
           triggerSignal: 'change',
           checked: isChecked
@@ -1384,15 +1447,23 @@
     lastHandledTarget = target;
 
     // Checkbox State Detection:
-    // When a user clicks a checkbox, the target state defaults to ON (true).
-    // Only flag as uncheck if the checkbox was explicitly ALREADY checked prior to click and toggled to false.
+    // Determine the exact user-intended state:
+    // If the checkbox was clicked, inspect post-interaction state.
+    // If it started checked and ended unchecked -> desiredState: false, isUncheck: true.
+    // If it started unchecked and ended checked -> desiredState: true.
+    // If DOM hasn't updated yet at 70ms: infer toggle from initial state (!initialChecked).
     const cbInfo = detectCheckbox(target);
     if (cbInfo) {
       const initialChecked = readCheckboxChecked(cbInfo);
       setTimeout(() => {
         const postChecked = readCheckboxChecked(cbInfo);
-        const isTrueUncheck = (initialChecked === true && postChecked === false);
-        const finalDesired = isTrueUncheck ? false : true; // DEFAULT ON for any clicked checkbox
+        let finalDesired;
+        if (initialChecked !== postChecked) {
+          finalDesired = postChecked;
+        } else {
+          finalDesired = !initialChecked;
+        }
+        const isTrueUncheck = (finalDesired === false);
 
         emitAction('CLICK', target, {
           detail: event.detail || 1,
@@ -1420,7 +1491,7 @@
   /**
    * Universal action emitter accessible across injected contexts
    */
-  window.__recordAction = function(rawAction) {
+  window.__recordAction = function (rawAction) {
     if (isPaused || !rawAction) return;
     const actionUid = 'act_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const actionTimestamp = rawAction.timestamp || Date.now();
@@ -1459,20 +1530,20 @@
       const msgStr = '__WORKFLOW_CAPTURE_ACTION__:' + JSON.stringify(payload);
       console.debug(msgStr);
       console.info(msgStr);
-    } catch {}
+    } catch { }
 
     try {
       if (typeof window.__workflowCaptureEmitAction === 'function') {
         window.__workflowCaptureEmitAction(payload);
       }
-    } catch {}
+    } catch { }
 
     if (isInsideIframe) {
       try {
         if (window.top && window.top !== window && typeof window.top.__workflowCaptureEmitAction === 'function') {
           window.top.__workflowCaptureEmitAction(payload);
         }
-      } catch {}
+      } catch { }
     }
   };
 
@@ -1499,7 +1570,7 @@
         if (labelEl && labelEl.innerText) {
           return cleanToIdentifier(labelEl.innerText);
         }
-      } catch {}
+      } catch { }
     }
     const parentLabel = el.closest?.('label');
     if (parentLabel && parentLabel.innerText) {
@@ -1576,7 +1647,7 @@
         badge.style.transform = 'translateY(-6px)';
         setTimeout(() => badge.remove(), 350);
       }, 1800);
-    } catch {}
+    } catch { }
   }
 
   let activeHoverEl = null;
@@ -1716,7 +1787,7 @@
         }
         const hoverEl = document.getElementById('__reflow_hover_overlay__');
         if (hoverEl && hoverEl.parentNode) hoverEl.remove();
-      } catch {}
+      } catch { }
     }
   }
 
@@ -1886,7 +1957,7 @@
         if (window.SelectorResolver && typeof window.SelectorResolver.captureTarget === 'function') {
           try {
             targetFingerprint = window.SelectorResolver.captureTarget(tableEl);
-          } catch {}
+          } catch { }
         }
         if (!targetFingerprint || !targetFingerprint.candidates || targetFingerprint.candidates.length === 0) {
           targetFingerprint = buildFallbackTarget(tableEl);
@@ -2308,7 +2379,7 @@
     window.removeEventListener('blur', handleBlur, true);
     window.removeEventListener('keydown', handleKeyDown, true);
     window.removeEventListener('scroll', handleScroll, true);
-    try { window.removeEventListener('mouseover', onGlobalMouseOver, true); } catch {}
+    try { window.removeEventListener('mouseover', onGlobalMouseOver, true); } catch { }
     const remHud = document.getElementById('__reflow_recorder_hud__');
     if (remHud) remHud.remove();
     const remHover = document.getElementById('__reflow_hover_overlay__');

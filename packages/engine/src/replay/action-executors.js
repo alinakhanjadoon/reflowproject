@@ -59,7 +59,9 @@ async function ensureInteractable(elementHandle, action) {
         }
       } catch {}
     }
-    const hasDimensions = !!(el.offsetWidth || el.offsetHeight || (el.getClientRects && el.getClientRects().length));
+    const hasDimensions = (typeof el.offsetWidth === 'number' || typeof el.offsetHeight === 'number' || el.getClientRects)
+      ? !!(el.offsetWidth || el.offsetHeight || (el.getClientRects && el.getClientRects().length))
+      : true;
     const isVisible = hasDimensions || isBackdrop;
     const isDisabled = el.disabled === true;
     return { isVisible, isDisabled, didScroll: !wasInViewport && !isBackdrop };
@@ -193,48 +195,73 @@ async function executeClick(elementHandle, action, options = {}) {
   let checkboxStatus = null;
   try {
     checkboxStatus = await elementHandle.evaluate((el) => {
-      const isInputCb = el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox';
-      const isRoleCb = el.getAttribute('role') === 'checkbox';
-      const isMatCb = Boolean(el.closest('mat-checkbox, .mat-mdc-checkbox, dx-check-box'));
-      const hasInnerCb = Boolean(el.querySelector('input[type="checkbox"], [role="checkbox"]'));
-      const isPseudoCb = el.classList?.contains('mat-pseudo-checkbox') || Boolean(el.querySelector('.mat-pseudo-checkbox'));
-      const isInsideOption = Boolean(el.closest('mat-option, [role="option"], .mat-mdc-option'));
+      const hasAttr = (node, name) => Boolean(node && (typeof node.hasAttribute === 'function' ? node.hasAttribute(name) : (typeof node.getAttribute === 'function' && node.getAttribute(name) !== null)));
+      const getAttr = (node, name) => (node && typeof node.getAttribute === 'function' ? node.getAttribute(name) : null);
+      const query = (node, sel) => (node && typeof node.querySelector === 'function' ? node.querySelector(sel) : null);
+      const closest = (node, sel) => (node && typeof node.closest === 'function' ? node.closest(sel) : null);
+      const hasClass = (node, cls) => Boolean(node && node.classList && typeof node.classList.contains === 'function' && node.classList.contains(cls));
 
-      if (!isInputCb && !isRoleCb && !isMatCb && !hasInnerCb && !isPseudoCb && !isInsideOption) {
+      const isInputCb = el.tagName === 'INPUT' && ['checkbox', 'radio'].includes((el.type || '').toLowerCase());
+      const role = (getAttr(el, 'role') || '').toLowerCase();
+      const isRoleCb = role === 'checkbox' || role === 'switch' || hasAttr(el, 'aria-checked') || hasAttr(el, 'aria-pressed');
+      const isMatCb = el.tagName === 'MAT-CHECKBOX' || hasClass(el, 'mat-checkbox') || hasClass(el, 'mat-mdc-checkbox') || hasClass(el, 'dx-checkbox');
+      const hasInnerCb = Boolean(query(el, 'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]'));
+      const isPseudoCb = hasClass(el, 'mat-pseudo-checkbox') || Boolean(query(el, '.mat-pseudo-checkbox'));
+      const isInsideOption = Boolean(closest(el, 'mat-option, [role="option"], .mat-mdc-option'));
+      const hasDataCheck = hasAttr(el, 'data-state') || hasAttr(el, 'data-checked');
+
+      if (!isInputCb && !isRoleCb && !isMatCb && !hasInnerCb && !isPseudoCb && !isInsideOption && !hasDataCheck && !isTargetCheckbox) {
         return null;
       }
 
       const getChecked = () => {
         if (isInsideOption) {
-          const opt = el.closest('mat-option, [role="option"], .mat-mdc-option');
+          const opt = closest(el, 'mat-option, [role="option"], .mat-mdc-option');
           if (opt) {
-            const ariaSel = opt.getAttribute('aria-selected');
+            const ariaSel = getAttr(opt, 'aria-selected');
             if (ariaSel !== null && ariaSel !== undefined) return ariaSel === 'true';
-            if (opt.classList.contains('mat-mdc-option-selected') || opt.classList.contains('mat-option-selected')) return true;
-            if (opt.querySelector && opt.querySelector('.mat-pseudo-checkbox-checked')) return true;
+            if (hasClass(opt, 'mat-mdc-option-selected') || hasClass(opt, 'mat-option-selected')) return true;
+            if (query(opt, '.mat-pseudo-checkbox-checked')) return true;
           }
         }
         if (isInputCb) return Boolean(el.checked);
-        const input = el.querySelector('input[type="checkbox"]') ||
-                      el.closest('label')?.querySelector('input[type="checkbox"]') ||
-                      el.closest('mat-checkbox')?.querySelector('input[type="checkbox"]');
+        const input = query(el, 'input[type="checkbox"], input[type="radio"]') ||
+                      query(closest(el, 'label'), 'input[type="checkbox"], input[type="radio"]') ||
+                      query(closest(el, 'mat-checkbox'), 'input[type="checkbox"], input[type="radio"]');
         if (input) return Boolean(input.checked);
 
-        const aria = el.getAttribute('aria-checked') ??
-                     el.querySelector('[aria-checked]')?.getAttribute('aria-checked') ??
-                     el.closest('[aria-checked]')?.getAttribute('aria-checked');
+        const aria = getAttr(el, 'aria-checked') ??
+                     getAttr(query(el, '[aria-checked]'), 'aria-checked') ??
+                     getAttr(closest(el, '[aria-checked]'), 'aria-checked');
         if (aria !== null && aria !== undefined) return aria === 'true';
 
-        if (el.classList.contains('mat-mdc-checkbox-checked') ||
-            el.classList.contains('mat-checkbox-checked') ||
-            el.classList.contains('dx-checkbox-checked') ||
-            el.classList.contains('checked') ||
-            el.classList.contains('is-checked')) return true;
+        const pressed = getAttr(el, 'aria-pressed') ??
+                        getAttr(query(el, '[aria-pressed]'), 'aria-pressed');
+        if (pressed !== null && pressed !== undefined) return pressed === 'true';
 
-        if ((el.querySelector && el.querySelector('.mat-pseudo-checkbox-checked')) || el.classList.contains('mat-pseudo-checkbox-checked')) return true;
+        const dataState = getAttr(el, 'data-state') ??
+                          getAttr(query(el, '[data-state]'), 'data-state') ??
+                          getAttr(closest(el, '[data-state]'), 'data-state');
+        if (dataState === 'checked' || dataState === 'on') return true;
+        if (dataState === 'unchecked' || dataState === 'off') return false;
 
-        const matParent = el.closest('mat-checkbox');
-        if (matParent && (matParent.classList.contains('mat-mdc-checkbox-checked') || matParent.classList.contains('mat-checkbox-checked'))) return true;
+        const dataChecked = getAttr(el, 'data-checked') ??
+                            getAttr(query(el, '[data-checked]'), 'data-checked') ??
+                            getAttr(closest(el, '[data-checked]'), 'data-checked');
+        if (dataChecked === 'true' || dataChecked === '') return true;
+        if (dataChecked === 'false') return false;
+
+        if (hasClass(el, 'mat-mdc-checkbox-checked') ||
+            hasClass(el, 'mat-checkbox-checked') ||
+            hasClass(el, 'dx-checkbox-checked') ||
+            hasClass(el, 'ant-checkbox-checked') ||
+            hasClass(el, 'checked') ||
+            hasClass(el, 'is-checked')) return true;
+
+        if (query(el, '.mat-pseudo-checkbox-checked') || hasClass(el, 'mat-pseudo-checkbox-checked')) return true;
+
+        const matParent = closest(el, 'mat-checkbox');
+        if (matParent && (hasClass(matParent, 'mat-mdc-checkbox-checked') || hasClass(matParent, 'mat-checkbox-checked'))) return true;
 
         return false;
       };
@@ -248,20 +275,16 @@ async function executeClick(elementHandle, action, options = {}) {
   } catch {}
 
   let desiredState = undefined;
-  if (action.isUncheck === true) {
+  if (action.isUncheck === true || action.action === 'UNCHECK') {
     desiredState = false;
   } else if (action.desiredState !== undefined) {
-    // If recorded desiredState was false, only honor false if target was explicitly checked prior to interaction
-    if (action.desiredState === false && action.target?.fingerprint?.checked !== true) {
-      // User clicked an unchecked box to check it (default ON)
-      desiredState = true;
-    } else {
-      desiredState = Boolean(action.desiredState);
-    }
+    desiredState = Boolean(action.desiredState);
   } else if (action.checked !== undefined) {
     desiredState = Boolean(action.checked);
   } else if (action.meta?.checked !== undefined) {
     desiredState = Boolean(action.meta.checked);
+  } else if (action.target?.fingerprint?.checked === true || action.target?.checked === true) {
+    desiredState = false;
   } else if (isTargetCheckbox) {
     // Checkbox click default target state is ON (checked)
     desiredState = true;
@@ -491,7 +514,9 @@ async function executeClick(elementHandle, action, options = {}) {
   // If coordinate click was obscured (e.g. by transparent ripple or container),
   // OR if targeting an interactive button/link/export control, dispatch full synthetic DOM sequence
   // directly on the element so framework event listeners (Angular, React, Vue) receive the event reliably.
-  if (!clicked || !hitMeta.isDirectHit || isLikelyDownloadOrExport || hitMeta.isInteractive) {
+  // CRITICAL: Do NOT execute secondary clicks if element is a checkbox or a download action and was already clicked!
+  const isCheckboxControl = Boolean(checkboxStatus && checkboxStatus.isCheckbox);
+  if (!clicked || (!isCheckboxControl && !isLikelyDownloadOrExport && (!hitMeta.isDirectHit || hitMeta.isInteractive))) {
     try {
       await clickTarget.evaluate((el, alreadyClicked) => {
         try { el.focus?.(); } catch {}
@@ -561,36 +586,81 @@ async function executeClick(elementHandle, action, options = {}) {
   // 4. Standalone Checkbox State Verification & Enforcement:
   // If element is a checkbox and desiredState was specified, ensure it actually reached desiredState.
   // If the framework or custom styling prevented the toggle, attempt a direct toggle on inner input or label.
-  if (checkboxStatus && checkboxStatus.isCheckbox && !checkboxStatus.isInsideOption && desiredState !== undefined) {
+  if (isCheckboxControl && !checkboxStatus?.isInsideOption && desiredState !== undefined) {
+    if (page) await new Promise(r => setTimeout(r, 60));
     try {
-      await clickTarget.evaluate((el, desired) => {
-        const isInputCb = el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox';
+      const stateAchieved = await clickTarget.evaluate((el, desired) => {
+        const hasAttr = (node, name) => Boolean(node && (typeof node.hasAttribute === 'function' ? node.hasAttribute(name) : (typeof node.getAttribute === 'function' && node.getAttribute(name) !== null)));
+        const getAttr = (node, name) => (node && typeof node.getAttribute === 'function' ? node.getAttribute(name) : null);
+        const query = (node, sel) => (node && typeof node.querySelector === 'function' ? node.querySelector(sel) : null);
+        const closest = (node, sel) => (node && typeof node.closest === 'function' ? node.closest(sel) : null);
+        const hasClass = (node, cls) => Boolean(node && node.classList && typeof node.classList.contains === 'function' && node.classList.contains(cls));
+        const isInputCb = el.tagName === 'INPUT' && ['checkbox', 'radio'].includes((el.type || '').toLowerCase());
+
         const getChecked = () => {
           if (isInputCb) return Boolean(el.checked);
-          const input = el.querySelector('input[type="checkbox"]') ||
-                        el.closest('label')?.querySelector('input[type="checkbox"]') ||
-                        el.closest('mat-checkbox')?.querySelector('input[type="checkbox"]');
+          const input = query(el, 'input[type="checkbox"], input[type="radio"]') ||
+                        query(closest(el, 'label'), 'input[type="checkbox"], input[type="radio"]') ||
+                        query(closest(el, 'mat-checkbox'), 'input[type="checkbox"], input[type="radio"]');
           if (input) return Boolean(input.checked);
-          const aria = el.getAttribute('aria-checked') ??
-                       el.querySelector('[aria-checked]')?.getAttribute('aria-checked') ??
-                       el.closest('[aria-checked]')?.getAttribute('aria-checked');
+
+          const aria = getAttr(el, 'aria-checked') ??
+                       getAttr(query(el, '[aria-checked]'), 'aria-checked') ??
+                       getAttr(closest(el, '[aria-checked]'), 'aria-checked');
           if (aria !== null && aria !== undefined) return aria === 'true';
-          if (el.classList.contains('mat-mdc-checkbox-checked') ||
-              el.classList.contains('mat-checkbox-checked') ||
-              el.classList.contains('dx-checkbox-checked') ||
-              el.classList.contains('checked') ||
-              el.classList.contains('is-checked')) return true;
-          if (el.querySelector('.mat-pseudo-checkbox-checked') || el.classList.contains('mat-pseudo-checkbox-checked')) return true;
+
+          const pressed = getAttr(el, 'aria-pressed') ?? getAttr(query(el, '[aria-pressed]'), 'aria-pressed');
+          if (pressed !== null && pressed !== undefined) return pressed === 'true';
+
+          const dataState = getAttr(el, 'data-state') ?? getAttr(query(el, '[data-state]'), 'data-state') ?? getAttr(closest(el, '[data-state]'), 'data-state');
+          if (dataState === 'checked' || dataState === 'on') return true;
+          if (dataState === 'unchecked' || dataState === 'off') return false;
+
+          const dataChecked = getAttr(el, 'data-checked') ?? getAttr(query(el, '[data-checked]'), 'data-checked') ?? getAttr(closest(el, '[data-checked]'), 'data-checked');
+          if (dataChecked === 'true' || dataChecked === '') return true;
+          if (dataChecked === 'false') return false;
+
+          if (hasClass(el, 'mat-mdc-checkbox-checked') ||
+              hasClass(el, 'mat-checkbox-checked') ||
+              hasClass(el, 'dx-checkbox-checked') ||
+              hasClass(el, 'ant-checkbox-checked') ||
+              hasClass(el, 'checked') ||
+              hasClass(el, 'is-checked')) return true;
+
+          if (query(el, '.mat-pseudo-checkbox-checked') || hasClass(el, 'mat-pseudo-checkbox-checked')) return true;
+
+          const matParent = closest(el, 'mat-checkbox');
+          if (matParent && (hasClass(matParent, 'mat-mdc-checkbox-checked') || hasClass(matParent, 'mat-checkbox-checked'))) return true;
+
           return false;
         };
 
-        const nowChecked = getChecked();
+        let nowChecked = getChecked();
         if (nowChecked !== desired) {
-          const recoveryEl = el.querySelector('input[type="checkbox"]') || el.closest('label') || el;
+          const recoveryEl = query(el, 'input[type="checkbox"], input[type="radio"]') || closest(el, 'label') || el;
           recoveryEl.click?.();
+          nowChecked = getChecked();
         }
+        return nowChecked === desired;
       }, desiredState);
-    } catch {}
+
+      if (!stateAchieved) {
+        logger.warn(`[Replay] Checkbox state verification failed: expected ${desiredState ? 'CHECKED' : 'UNCHECKED'}.`);
+        throw new ActionExecutionError(`Checkbox state verification failed: expected ${desiredState ? 'CHECKED' : 'UNCHECKED'} but state could not be verified.`, {
+          actionIndex: action.index,
+          actionType: action.type,
+          elementName: action.elementName || action.name
+        });
+      }
+      logger.info(`[Replay] Checkbox "${action.elementName || action.name || 'Checkbox'}" state successfully verified: ${desiredState ? 'CHECKED' : 'UNCHECKED'}.`);
+    } catch (verifyErr) {
+      if (verifyErr instanceof ActionExecutionError) throw verifyErr;
+      throw new ActionExecutionError(`Checkbox state verification failed: ${verifyErr.message}`, {
+        actionIndex: action.index,
+        actionType: action.type,
+        elementName: action.elementName || action.name
+      });
+    }
   }
 }
 
@@ -743,6 +813,15 @@ async function executeType(elementHandle, action, options = {}) {
   }
 
   try {
+    const isCheckboxOrRadio = await elementHandle.evaluate(el => {
+      const type = (el.type || '').toLowerCase();
+      return type === 'checkbox' || type === 'radio';
+    }).catch(() => false);
+    if (isCheckboxOrRadio) {
+      logger.info(`[Replay] Skipping executeType on checkbox/radio input.`);
+      return;
+    }
+
     await elementHandle.focus().catch(() => {});
 
     // Inspect if target element is a date/time field across native HTML5,

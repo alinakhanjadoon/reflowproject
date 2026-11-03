@@ -1,97 +1,519 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Acme Invoices &mdash; Test Portal (Page 1 of 3)</title>
-    <style>
-    :root { font-family: system-ui, 'Segoe UI', Roboto, Arial, sans-serif; }
-    body { margin: 0; background: #f6f7f9; color: #1c2733; }
-    header { background: #12314f; color: #fff; padding: 18px 28px; }
-    header h1 { margin: 0; font-size: 20px; }
-    header p { margin: 4px 0 0; opacity: .75; font-size: 13px; }
-    main { max-width: 860px; margin: 28px auto; background: #fff; border: 1px solid #dde3ea; border-radius: 10px; padding: 22px 26px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e6ebf1; }
-    th { color: #5b6b7d; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    a { color: #1466c2; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .pagination { margin-top: 18px; display: flex; gap: 8px; align-items: center; font-size: 14px; }
-    .pagination a { padding: 6px 11px; border: 1px solid #cfd8e3; border-radius: 7px; }
-    .pagination .current { padding: 6px 11px; border-radius: 7px; background: #12314f; color: #fff; border: 1px solid #12314f; font-weight: 600; }
-    footer { text-align: center; color: #7a8797; font-size: 12px; margin: 18px 0 30px; }
-    .views { margin-top: 10px; font-size: 13px; }
-    .views a { color: #9fc0e6; }
-    .note { background: #fff8e5; border: 1px solid #f0d999; color: #7a5b12; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 16px; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
-    .invoice-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; background: #fbfcfe; }
-    .invoice-card .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-    .invoice-card .inv-num { font-weight: 700; font-size: 15px; color: #12314f; }
-    .badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: #fdecec; color: #b42318; border: 1px solid #f5c2c0; }
-    .invoice-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
-    .invoice-card dt { color: #7a8797; }
-    .invoice-card dd { margin: 0; }
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReFlow Test Portal</title>
+<style>
+:root{--navy:#14213d;--navy2:#1d2f55;--blue:#2563eb;--bg:#f3f5f9;--card:#fff;--line:#e2e6ee;--text:#1b2433;--muted:#6b7589;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+a{color:var(--blue)}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 10px}h3{margin:0;font-size:15px}
+.muted{color:var(--muted)}
+.shell{display:flex;min-height:100vh}
+.side{width:220px;background:var(--navy);color:#fff;padding:18px 0;flex:none}
+.brand{font-weight:700;font-size:16px;padding:0 20px 18px;border-bottom:1px solid #ffffff22;margin-bottom:10px}
+.side nav a{display:block;padding:9px 20px;color:#c9d3ea;text-decoration:none;border-left:3px solid transparent}
+.side nav a:hover{background:var(--navy2);color:#fff}
+.side nav a[aria-current=page]{background:var(--navy2);color:#fff;border-left-color:#60a5fa}
+.main{flex:1;min-width:0}
+.top{display:flex;justify-content:flex-end;align-items:center;gap:14px;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line)}
+#content{padding:22px 24px 60px}
+.btn{display:inline-block;padding:6px 11px;border:1px solid #c5ccda;border-radius:6px;background:#fff;color:var(--text);font:inherit;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:#f1f4fa}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.btn.primary:hover{background:#1d4ed8}
+.btn.on{background:var(--navy);color:#fff;border-color:var(--navy)}.btn.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:14px 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.stat b{display:block;font-size:24px;margin-top:2px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:2px}
+input[type=text],input[type=email],input[type=password],input[type=date],input[type=number],select{font:inherit;padding:6px 8px;border:1px solid #c5ccda;border-radius:6px;background:#fff;min-width:0;width:100%}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.row>div{flex:1 1 150px}
+.crow{display:grid;grid-template-columns:1.1fr 1fr 1.2fr 1.2fr;gap:8px;margin-top:8px}
+.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:10px 0}
+.tablewrap{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:10px}
+table.grid{border-collapse:collapse;width:100%}
+.grid th,.grid td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;white-space:nowrap}
+.grid thead th{background:#f7f9fc;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+.grid thead a{color:inherit;text-decoration:none}.grid tbody tr:hover{background:#fafbfe}
+td.num,th.num{text-align:right}.acts{display:flex;gap:6px}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;background:#e8ecf4;color:#445}
+.badge.Pending{background:#fef3c7;color:var(--warn)}.badge.Paid{background:#dcfce7;color:var(--ok)}.badge.Overdue{background:#fee2e2;color:var(--bad)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.card .top2{display:flex;justify-content:space-between;align-items:center}.card .amt{font-size:20px;font-weight:700;min-height:28px}
+.ilist{list-style:none;margin:0;padding:0;background:#fff;border:1px solid var(--line);border-radius:10px}
+.ilist li{display:flex;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.ilist li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#vscroll{height:420px;overflow:auto;position:relative;border:1px solid var(--line);border-radius:10px;background:#fff}
+#vinner{position:relative;border:0;border-radius:0}#vinner li{border-bottom:1px solid var(--line);position:absolute}
+.pager{display:flex;gap:8px;align-items:center;justify-content:center;margin:14px 0;flex-wrap:wrap}
+.login{max-width:380px;margin:9vh auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:28px}
+.login .brand{color:var(--navy);border:0;padding:0 0 4px;font-size:20px}.login .field{margin:12px 0}
+.err{background:#fee2e2;color:var(--bad);padding:8px 10px;border-radius:6px;margin:10px 0}.okmsg{background:#dcfce7;color:var(--ok);padding:8px 10px;border-radius:6px;margin:10px 0}
+.hint{background:#eff6ff;border-radius:6px;padding:8px 10px;margin-top:14px;font-size:12px;color:#334}
+dl.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;margin:0}dl.kv dt{color:var(--muted)}dl.kv dd{margin:0;overflow-wrap:anywhere}
+.switch{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}.switch input{margin-top:4px;width:18px;height:18px}
+.switch b{display:block}.tag{font-size:12px;background:#eef2ff;color:#3730a3;border-radius:5px;padding:1px 6px}
+.toast{position:fixed;right:18px;bottom:18px;background:#111827;color:#fff;padding:10px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:380px;z-index:50}
+.toast.show{opacity:1}.toast.error{background:var(--bad)}
+.dlg{border:2px solid var(--bad);background:#fff;border-radius:10px;padding:14px;margin:12px 0}
+.presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.sel{display:inline-flex;gap:5px;align-items:center;font-size:13px;color:var(--text);margin:0}
+@media(max-width:800px){.side{width:150px}.crow{grid-template-columns:1fr 1fr}}
 </style>
-  </head>
-  <body>
-    <header>
-      <h1>Acme Test Portal</h1>
-      <p>Demo portal for ReFlow end-to-end runs &mdash; invoices with downloadable PDFs</p>
-      <nav class="views">
-        <a href="cards.html">Card view (no download buttons) &rarr;</a>
-      </nav>
-    </header>
-    <main>
-      <table id="invoices">
-        <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Amount</th><th>File</th></tr>
-        </thead>
-        <tbody>
-        <tr>
-          <td>INV-0001</td>
-          <td>2026-09-01</td>
-          <td>$1,000.00</td>
-          <td><a class="download" href="pdfs/INV-0001.pdf" download="INV-0001.pdf">Download PDF</a></td>
-        </tr>
-        <tr>
-          <td>INV-0002</td>
-          <td>2026-09-04</td>
-          <td>$1,137.97</td>
-          <td><a class="download" href="pdfs/INV-0002.pdf" download="INV-0002.pdf">Download PDF</a></td>
-        </tr>
-        <tr>
-          <td>INV-0003</td>
-          <td>2026-09-07</td>
-          <td>$1,274.94</td>
-          <td><a class="download" href="pdfs/INV-0003.pdf" download="INV-0003.pdf">Download PDF</a></td>
-        </tr>
-        <tr>
-          <td>INV-0004</td>
-          <td>2026-09-10</td>
-          <td>$1,411.91</td>
-          <td><a class="download" href="pdfs/INV-0004.pdf" download="INV-0004.pdf">Download PDF</a></td>
-        </tr>
-        <tr>
-          <td>INV-0005</td>
-          <td>2026-09-13</td>
-          <td>$1,548.88</td>
-          <td><a class="download" href="pdfs/INV-0005.pdf" download="INV-0005.pdf">Download PDF</a></td>
-        </tr>
-        <tr>
-          <td>INV-0006</td>
-          <td>2026-09-16</td>
-          <td>$1,685.85</td>
-          <td><a class="download" href="pdfs/INV-0006.pdf" download="INV-0006.pdf">Download PDF</a></td>
-        </tr>
-        </tbody>
-      </table>
-      <nav class="pagination" aria-label="Pagination">
-        <span class="current" aria-current="page">1</span>
-        <a href="page2.html">2</a>
-        <a href="page3.html">3</a>
-        <a rel="next" href="page2.html">Next</a>
-      </nav>
-    </main>
-    <footer>Page 1 of 3 &mdash; 18 invoices total</footer>
-  </body>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script>
+(function () {
+'use strict';
+
+/* ---------- storage ---------- */
+var KEY = 'rtp_state_v1', SESSION = 'rtp_session';
+var mem = {};
+var ls = {
+  get: function (k) { try { return localStorage.getItem(k); } catch (e) { return mem[k] || null; } },
+  set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+  del: function (k) { try { localStorage.removeItem(k); } catch (e) { delete mem[k]; } }
+};
+
+/* ---------- helpers ---------- */
+var $ = function (s, r) { return (r || document).querySelector(s); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+var money = function (v) { return v == null ? '' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+var dash = function (v) { return v ? esc(v) : '<span class="muted">—</span>'; };
+var Q = function () { return new URLSearchParams(location.search); };
+function href(o) { var q = Q(); for (var k in o) { if (o[k] == null || o[k] === '') q.delete(k); else q.set(k, o[k]); } return '?' + q.toString(); }
+function ts(iso) { var d = new Date(iso), p = function (n, l) { return String(n).padStart(l || 2, '0'); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3); }
+function addDays(iso, n) { var d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+var pad = function (n, l) { return String(n).padStart(l || 3, '0'); };
+
+/* ---------- seed data ---------- */
+var PM = ['Bank Transfer', 'Credit Card', 'Cheque', 'Cash', 'ACH'];
+var DESC = ['Monthly supply of office materials', 'Quarterly logistics services', 'Wholesale goods order', 'Maintenance and support contract', 'Retail stock replenishment'];
+var LONG = 'Annual master services agreement covering warehouse operations, inbound and outbound freight coordination, quality inspection, packaging and labelling, returns processing, seasonal labour surcharge, fuel adjustments, customs documentation, insurance cover for goods in transit, storage fees for pallets held beyond the agreed period, and a one-off onboarding fee for the new regional distribution centre. Payment is due within thirty days of the invoice date; late payments incur interest as set out in clause 14 of the agreement.';
+var SPECIAL = 'O\'Brien & Sons, "Fine" <Goods> Café Ltd. #9';
+
+function inv(n, customer, status, amount, o) {
+  var r = { id: 'INV-' + pad(n), customer: customer, status: status, amount: amount, type: 'Invoice',
+    invoiceDate: addDays('2026-08-01', n * 3), dueDate: addDays('2026-08-31', n * 3),
+    method: PM[n % PM.length], description: DESC[n % DESC.length] };
+  if (o) for (var k in o) r[k] = o[k];
+  return r;
+}
+var TEN = [[1, 'ABC Supplies', 'Pending', 1500], [2, 'Global Traders', 'Paid', 2500], [3, 'City Wholesale', 'Pending', 500], [4, 'Metro Services', 'Pending', 3500], [5, 'Prime Distribution', 'Overdue', 1800], [6, 'Alpha Stores', 'Paid', 4200], [7, 'North Logistics', 'Pending', 2100], [8, 'Westside Retail', 'Pending', 800], [9, 'Eastern Traders', 'Overdue', 5200], [10, 'Central Supplies', 'Paid', 1100]];
+var EXTRA = [[11, 'Harbor Foods', 'Pending', 950], [12, 'Summit Hardware', 'Paid', 3300, { type: 'Credit Note' }], [13, 'Lakeside Pharma', 'Overdue', 2750], [14, 'Pioneer Electric', 'Pending', 1250], [15, 'Redwood Timber', 'Paid', 6100, { type: 'Statement' }], [16, 'Bluebird Cafe Supply', 'Pending', 420], [17, 'Crescent Textiles', 'Overdue', 3900, { type: 'Credit Note' }], [18, 'Falcon Freight', 'Paid', 2200], [19, 'Orchid Wellness', 'Pending', 1750], [20, 'Granite Builders', 'Pending', 7800, { type: 'Statement' }], [21, 'Maple Office Mart', 'Paid', 640], [22, 'Nova Tech Parts', 'Overdue', 1320, { type: 'Credit Note' }], [23, 'Sterling Print Works', 'Pending', 2600], [24, 'Zenith Cleaning Co', 'Paid', 980]];
+var mkList = function (arr) { return arr.map(function (a) { return inv(a[0], a[1], a[2], a[3], a[4]); }); };
+
+var COND = [['C01', 'Pending', 1500], ['C02', 'Pending', 500], ['C03', 'Overdue', 2200], ['C04', 'Paid', 3000], ['C05', 'Pending', 1000], ['C06', 'Pending', 1001], ['C07', 'Overdue', 900], ['C08', 'Paid', 800], ['C09', 'Pending', 4800], ['C10', 'Overdue', 1000], ['C11', 'Paid', 1000], ['C12', 'Pending', 250]];
+var CUST2 = ['Aurora Metals', 'Birch Lane Grocers', 'Cobalt Systems', 'Dune Outfitters', 'Evergreen Farms', 'Fjord Marine', 'Gulf Coast Paper', 'Hilltop Garage', 'Iris Boutique', 'Juniper Labs', 'Kestrel Air', 'Lumen Lighting'];
+
+var PRESETS = {
+  seed: { name: 'Default seed — 24 invoices', purpose: 'Initial state. Mixed statuses, three document types.', build: function () { return mkList(TEN.concat(EXTRA)); } },
+  A: { name: 'Preset A — Five Invoices', purpose: 'Basic looping test (INV-001 … INV-005).', build: function () { return mkList(TEN.slice(0, 5)); } },
+  B: { name: 'Preset B — Ten Invoices', purpose: 'Multiple-record processing, mixed statuses (INV-001 … INV-010).', build: function () { return mkList(TEN); } },
+  C: { name: 'Preset C — Condition Testing', purpose: 'AND/OR conditions. Pending AND Amount>1000 → INV-C01, INV-C06, INV-C09 (3). Pending OR Overdue → 9 records (all except C04, C08, C11).', build: function () { return COND.map(function (c, i) { return { id: 'INV-' + c[0], customer: 'Condition Co ' + (i + 1), status: c[1], amount: c[2], type: 'Invoice', invoiceDate: addDays('2026-09-01', i), dueDate: addDays('2026-10-01', i), method: PM[i % 5], description: 'Condition test record ' + c[0] }; }); } },
+  D: { name: 'Preset D — Twenty-Five Invoices', purpose: 'Pagination: 25 records = 5 pages of 5, 3 of 10, 2 of 20 (INV-D01 … INV-D25).', build: function () { var out = []; for (var i = 1; i <= 25; i++) out.push({ id: 'INV-D' + pad(i, 2), customer: CUST2[i % 12], status: ['Pending', 'Paid', 'Overdue'][i % 3], amount: 400 + ((i * 379) % 4600) - (((i * 379) % 4600) % 10), type: 'Invoice', invoiceDate: addDays('2026-08-01', i * 2), dueDate: addDays('2026-08-31', i * 2), method: PM[i % 5], description: DESC[i % 5] }); return out; } },
+  E: { name: 'Preset E — Missing Data', purpose: 'Empty descriptions, missing dates, payment method, document type, zero amount (INV-E01 … INV-E08).', build: function () {
+    var b = function (n, o) { var r = { id: 'INV-E' + pad(n, 2), customer: 'Sparse Customer ' + n, status: ['Pending', 'Paid', 'Overdue'][n % 3], amount: 700 + n * 110, type: 'Invoice', invoiceDate: addDays('2026-09-01', n), dueDate: addDays('2026-10-01', n), method: PM[n % 5], description: 'Complete record' }; for (var k in o) r[k] = o[k]; return r; };
+    return [b(1), b(2, { description: '' }), b(3, { dueDate: '' }), b(4, { invoiceDate: '', dueDate: '' }), b(5, { method: '' }), b(6, { description: '', method: '', dueDate: '' }), b(7, { amount: 0 }), b(8, { type: '' })]; } },
+  F: { name: 'Preset F — Duplicate-Looking Records', purpose: 'Near-identical customers, amounts and dates with unique IDs (INV-F01 … INV-F08).', build: function () {
+    var names = ['Acme Supply Co', 'Acme Supply Co.', 'ACME Supply Co', 'Acme Supply Co', 'Acme Supplies Co', 'Acme Supply Co', 'Acme  Supply Co', 'Acme Supply Co'];
+    return names.map(function (c, i) { return { id: 'INV-F' + pad(i + 1, 2), customer: c, status: i === 3 ? 'Paid' : 'Pending', amount: i === 5 ? 1250 : 1200, type: 'Invoice', invoiceDate: '2026-09-01', dueDate: '2026-10-01', method: 'Bank Transfer', description: 'Monthly supply of office materials' }; }); } }
+};
+
+var SCEN = [
+  { k: 'noDownload', t: 'One invoice has no download button', d: 'The Download PDF button is omitted (list views and detail page) for the 3rd record in the dataset.', at: 2 },
+  { k: 'slowDownload', t: 'One download takes three seconds', d: 'Clicking Download for the 2nd record starts the file 3 seconds later.', at: 1 },
+  { k: 'failDownload', t: 'One download fails', d: 'Download for the 4th record shows an error alert and produces no file.', at: 3 },
+  { k: 'vanish', t: 'One record disappears after filtering', d: 'The 5th record is hidden whenever any filter is applied, even if it matches.', at: 4 },
+  { k: 'missingAmount', t: 'One invoice has a missing amount', d: 'The 6th record has no amount (blank cell; "N/A" in the PDF).', at: 5 },
+  { k: 'emptyStatus', t: 'One invoice has an empty status', d: 'The 7th record has an empty status.', at: 6 },
+  { k: 'sortFlip', t: 'Sorting changes between actions', d: 'After every successful download the list order reverses, so record positions shift mid-loop.' },
+  { k: 'delayedDetail', t: 'A detail page has a delayed load', d: 'Invoice detail content appears 2.5 seconds after the route loads.' },
+  { k: 'returnFiltered', t: 'Detail page returns to the filtered collection', d: 'ON (default): "Return to Invoices" restores the exact list URL. OFF: it goes to the unfiltered default list.' },
+  { k: 'duplicateCustomer', t: 'A record has a duplicate customer name', d: 'The 8th record gets the same customer name as the 1st record.' },
+  { k: 'longDescription', t: 'One record contains a long description', d: 'The 9th record has a ~550 character description.', at: 8 },
+  { k: 'specialChars', t: 'One record has special characters in its customer name', d: 'The 10th record customer is: ' + SPECIAL, at: 9 }
+];
+
+/* ---------- state ---------- */
+function defaultScen() { var s = {}; SCEN.forEach(function (x) { s[x.k] = x.k === 'returnFiltered'; }); return s; }
+function fresh() { return { base: PRESETS.seed.build(), preset: 'seed', scenarios: defaultScen(), log: [], downloads: [], selected: [], flip: false }; }
+var S;
+try { S = JSON.parse(ls.get(KEY)); } catch (e) { S = null; }
+if (!S || !S.base) S = fresh();
+S.scenarios = Object.assign(defaultScen(), S.scenarios || {});
+function save() { ls.set(KEY, JSON.stringify(S)); }
+function log(type, id, detail) { S.log.unshift({ t: new Date().toISOString(), type: type, id: id || '', detail: detail || '' }); if (S.log.length > 500) S.log.length = 500; save(); }
+
+function data() {
+  var b = S.base.map(function (r) { return Object.assign({}, r); }), n = b.length, sc = S.scenarios;
+  if (!n) return b;
+  var at = function (i) { return b[Math.min(i, n - 1)]; };
+  if (sc.noDownload) at(2).noDownload = true;
+  if (sc.slowDownload) at(1).slow = true;
+  if (sc.failDownload) at(3).fail = true;
+  if (sc.vanish) at(4).vanish = true;
+  if (sc.missingAmount) at(5).amount = null;
+  if (sc.emptyStatus) at(6).status = '';
+  if (sc.duplicateCustomer) at(7).customer = b[0].customer;
+  if (sc.longDescription) at(8).description = LONG;
+  if (sc.specialChars) at(9).customer = SPECIAL;
+  return b;
+}
+var find = function (id) { return data().find(function (r) { return r.id === id; }); };
+
+/* ---------- PDF (hand-built, no dependencies) ---------- */
+function pdfEsc(s) { return String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').replace(/[^\x20-\xFF]/g, '?').replace(/[\\()]/g, '\\$&'); }
+function wrap(t, n) { var w = String(t || '').split(/\s+/), out = [], c = ''; w.forEach(function (x) { if ((c + ' ' + x).trim().length > n) { out.push(c); c = x; } else c = (c + ' ' + x).trim(); }); if (c) out.push(c); return out; }
+function lineItems(r) {
+  if (r.amount == null) return [['Services rendered', 1, null], ['Materials', 1, null], ['Handling', 1, null]];
+  var a = Math.round(r.amount * 100), i1 = Math.round(a * 0.6), i2 = Math.round(a * 0.3), i3 = a - i1 - i2;
+  return [['Professional services', 1, i1 / 100], ['Materials and supplies', 1, i2 / 100], ['Handling and delivery', 1, i3 / 100]];
+}
+function makePdf(r) {
+  var ops = [], na = function (v) { return v || 'N/A'; }, m = function (v) { return v == null ? 'N/A' : money(v); };
+  var T = function (x, y, size, bold, text) { ops.push('BT /' + (bold ? 'F2' : 'F1') + ' ' + size + ' Tf ' + x + ' ' + y + ' Td (' + pdfEsc(text) + ') Tj ET'); };
+  T(50, 800, 18, 1, 'ReFlow Demo Trading Co.');
+  T(50, 784, 9, 0, '100 Market Street, Springfield, USA  |  billing@demo.local  |  Tax ID 00-0000000');
+  T(400, 800, 20, 1, (r.type || 'Invoice').toUpperCase());
+  ops.push('0.8 w 50 772 m 545 772 l S');
+  var y = 748;
+  [['Invoice number', r.id], ['Customer', r.customer], ['Invoice date', na(r.invoiceDate)], ['Due date', na(r.dueDate)], ['Status', na(r.status)], ['Payment method', na(r.method)], ['Document type', na(r.type)]].forEach(function (p) { T(50, y, 11, 0, p[0] + ':'); T(170, y, 11, 1, p[1]); y -= 17; });
+  y -= 10; ops.push('50 ' + (y + 6) + ' 495 20 re S');
+  T(56, y, 10, 1, 'Description'); T(350, y, 10, 1, 'Qty'); T(400, y, 10, 1, 'Unit price'); T(480, y, 10, 1, 'Amount'); y -= 22;
+  lineItems(r).forEach(function (li) { T(56, y, 10, 0, li[0]); T(350, y, 10, 0, String(li[1])); T(400, y, 10, 0, m(li[2])); T(480, y, 10, 0, m(li[2])); y -= 17; });
+  ops.push('0.8 w 50 ' + (y + 8) + ' m 545 ' + (y + 8) + ' l S'); y -= 8;
+  T(400, y, 12, 1, 'Total: ' + m(r.amount)); y -= 36;
+  T(50, y, 11, 1, 'Notes'); y -= 15;
+  var lines = wrap(r.description || 'N/A', 90); lines.slice(0, 10).forEach(function (l) { T(50, y, 10, 0, l); y -= 13; });
+  if (lines.length > 10) T(50, y, 10, 0, '...');
+  T(50, 40, 8, 0, 'Generated by ReFlow Test Portal - dummy data for automation testing only.');
+  var content = ops.join('\n');
+  var objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+    '<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream'];
+  var out = '%PDF-1.4\n', off = [];
+  objs.forEach(function (o, i) { off.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+  var x = out.length;
+  out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + off.map(function (o) { return String(o).padStart(10, '0') + ' 00000 n \n'; }).join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
+  var u = new Uint8Array(out.length); for (var i = 0; i < out.length; i++) u[i] = out.charCodeAt(i) & 255;
+  return u;
+}
+
+/* ---------- downloads ---------- */
+function toast(msg, kind) { var t = $('#toast'); t.className = 'toast show ' + (kind || ''); t.setAttribute('role', kind === 'error' ? 'alert' : 'status'); t.textContent = msg; clearTimeout(toast.h); toast.h = setTimeout(function () { t.className = 'toast'; }, 4000); }
+function download(id) {
+  var r = find(id);
+  if (!r) { toast('Invoice ' + id + ' not found', 'error'); return; }
+  if (r.noDownload) return;
+  var go = function () {
+    if (r.fail) { log('download_failed', id, 'Simulated server error'); toast('Download failed for ' + id + ': server error (simulated)', 'error'); return; }
+    var blob = new Blob([makePdf(r)], { type: 'application/pdf' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = id + '.pdf'; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    S.downloads.unshift({ id: id, file: id + '.pdf', t: new Date().toISOString() }); if (S.downloads.length > 500) S.downloads.length = 500;
+    log('download', id, id + '.pdf');
+    toast('Downloaded ' + id + '.pdf');
+    if (S.scenarios.sortFlip) { S.flip = !S.flip; save(); if ($('#collection')) drawCollection(); }
+  };
+  if (r.slow) { toast('Preparing ' + id + '.pdf …'); setTimeout(go, 3000); } else go();
+}
+
+/* ---------- filtering / sorting ---------- */
+var FIELDS = { status: { l: 'Status' }, amount: { l: 'Amount', num: 1 }, customer: { l: 'Customer' }, id: { l: 'Invoice ID' }, type: { l: 'Document type' }, invoiceDate: { l: 'Invoice date' }, dueDate: { l: 'Due date' } };
+var OPS = { eq: 'Equals', neq: 'Not equals', contains: 'Contains', gt: 'Greater than', lt: 'Less than', between: 'Between' };
+function conds(q) {
+  var out = [];
+  for (var i = 1; i <= 3; i++) {
+    var f = q.get('c' + i + 'f'), o = q.get('c' + i + 'o'), v = q.get('c' + i + 'v') || '', v2 = q.get('c' + i + 'v2') || '';
+    if (f && FIELDS[f] && OPS[o] && (v !== '' || (o === 'between' && v2 !== ''))) out.push({ f: f, o: o, v: v, v2: v2 });
+  }
+  return out;
+}
+function matchCond(r, c) {
+  var a = r[c.f];
+  if (FIELDS[c.f].num) {
+    if (a == null) return false;
+    var x = parseFloat(c.v), y = parseFloat(c.v2);
+    switch (c.o) {
+      case 'eq': return a === x; case 'neq': return a !== x; case 'contains': return String(a).indexOf(c.v) >= 0;
+      case 'gt': return a > x; case 'lt': return a < x;
+      case 'between': return (isNaN(x) || a >= x) && (isNaN(y) || a <= y);
+    }
+    return false;
+  }
+  a = String(a == null ? '' : a).toLowerCase(); var v = c.v.toLowerCase(), v2 = c.v2.toLowerCase();
+  switch (c.o) {
+    case 'eq': return a === v; case 'neq': return a !== v; case 'contains': return a.indexOf(v) >= 0;
+    case 'gt': return a !== '' && a > v; case 'lt': return a !== '' && a < v;
+    case 'between': return a !== '' && (v === '' || a >= v) && (v2 === '' || a <= v2);
+  }
+  return false;
+}
+function hasFilter(q) { return !!(q.get('status') || q.get('customer') || q.get('invoiceId') || q.get('type') || conds(q).length); }
+function filterRows(q) {
+  var cs = conds(q), logic = q.get('logic') === 'or' ? 'or' : 'and', any = hasFilter(q);
+  var rows = data().filter(function (r) {
+    if (q.get('status') && (r.status || '').toLowerCase() !== q.get('status').toLowerCase()) return false;
+    if (q.get('customer') && (r.customer || '').toLowerCase().indexOf(q.get('customer').toLowerCase()) < 0) return false;
+    if (q.get('invoiceId') && r.id.toLowerCase().indexOf(q.get('invoiceId').toLowerCase()) < 0) return false;
+    if (q.get('type') && (r.type || '').toLowerCase() !== q.get('type').toLowerCase()) return false;
+    if (!cs.length) return true;
+    return logic === 'or' ? cs.some(function (c) { return matchCond(r, c); }) : cs.every(function (c) { return matchCond(r, c); });
+  });
+  if (any) rows = rows.filter(function (r) { return !r.vanish; });
+  return rows;
+}
+var nat = function (a, b) { return String(a || '').localeCompare(String(b || ''), 'en', { numeric: true, sensitivity: 'base' }); };
+function sortRows(rows, key, dir) {
+  var s = rows.slice().sort(function (a, b) {
+    var c;
+    if (key === 'amount') { var x = a.amount == null ? -Infinity : a.amount, y = b.amount == null ? -Infinity : b.amount; c = x === y ? 0 : (x < y ? -1 : 1); }
+    else c = nat(a[key], b[key]);
+    return c || nat(a.id, b.id);
+  });
+  if (dir === 'desc') s.reverse();
+  if (S.scenarios.sortFlip && S.flip) s.reverse();
+  return s;
+}
+
+/* ---------- layout ---------- */
+var NAV = [['dashboard', 'Dashboard'], ['invoices', 'Invoices'], ['customers', 'Customers'], ['downloads', 'Download Center'], ['activity', 'Activity Log'], ['testdata', 'Test Data'], ['scenarios', 'Test Scenarios']];
+function shell(route, inner) {
+  return '<div class="shell"><aside class="side"><div class="brand">ReFlow Test Portal</div><nav aria-label="Main navigation">' +
+    NAV.map(function (n) { var on = n[0] === route; return '<a href="?route=' + n[0] + '"' + (on ? ' aria-current="page"' : '') + '>' + n[1] + '</a>'; }).join('') +
+    '</nav></aside><div class="main"><header class="top"><span class="muted">Signed in as admin@demo.local</span><button type="button" id="logout" class="btn">Log out</button></header><main id="content">' + inner + '</main></div></div>';
+}
+var badge = function (s) { return s ? '<span class="badge ' + esc(s) + '" data-status="' + esc(s) + '">' + esc(s) + '</span>' : '<span class="badge" data-status=""></span>'; };
+
+/* ---------- pages ---------- */
+function loginPage(err) {
+  return '<div class="login"><div class="brand">ReFlow Test Portal</div><p class="muted">Invoice management — sign in to continue</p>' +
+    (err ? '<div class="err" role="alert">' + esc(err) + '</div>' : '') +
+    '<form id="loginForm" novalidate><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" aria-label="Email"></div>' +
+    '<div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" aria-label="Password"></div>' +
+    '<button type="submit" class="btn primary" style="width:100%">Sign in</button></form>' +
+    '<div class="hint">Demo credentials: <b>admin@demo.local</b> / <b>Demo123!</b></div></div>';
+}
+function dashboardPage() {
+  var d = data(), c = function (s) { return d.filter(function (r) { return r.status === s; }).length; };
+  var total = d.reduce(function (s, r) { return s + (r.amount || 0); }, 0);
+  var recent = S.log.slice(0, 5);
+  return shell('dashboard', '<h1>Dashboard</h1><p class="muted">Overview of the current dataset: ' + esc(PRESETS[S.preset].name) + '</p>' +
+    '<div class="stats"><div class="stat" data-testid="stat-total"><span class="muted">Total invoices</span><b>' + d.length + '</b></div>' +
+    '<div class="stat" data-testid="stat-pending"><span class="muted">Pending</span><b>' + c('Pending') + '</b></div>' +
+    '<div class="stat" data-testid="stat-paid"><span class="muted">Paid</span><b>' + c('Paid') + '</b></div>' +
+    '<div class="stat" data-testid="stat-overdue"><span class="muted">Overdue</span><b>' + c('Overdue') + '</b></div>' +
+    '<div class="stat" data-testid="stat-amount"><span class="muted">Total amount</span><b>' + money(total) + '</b></div></div>' +
+    '<div class="panel"><h2>Quick navigation</h2><div class="row" style="gap:8px"><a class="btn primary" href="?route=invoices&view=table">Go to Invoices</a><a class="btn" href="?route=invoices&status=Pending&view=table&page=1">Pending invoices</a><a class="btn" href="?route=invoices&status=Overdue&view=table&page=1">Overdue invoices</a></div></div>' +
+    '<div class="panel"><h2>Recent activity</h2>' + (recent.length ? '<ul style="margin:0;padding-left:18px">' + recent.map(function (e) { return '<li>' + esc(ts(e.t)) + ' — ' + esc(e.type) + (e.id ? ' <b>' + esc(e.id) + '</b>' : '') + '</li>'; }).join('') + '</ul>' : '<p class="muted">No activity yet.</p>') + '</div>');
+}
+
+function opt(list, cur, blank) { return (blank != null ? '<option value="">' + blank + '</option>' : '') + list.map(function (x) { var v = Array.isArray(x) ? x[0] : x, l = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(v) + '"' + (String(cur) === String(v) ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join(''); }
+function invoicesPage() {
+  var q = Q(), view = ['table', 'cards', 'list'].indexOf(q.get('view')) >= 0 ? q.get('view') : 'table';
+  var cs = conds(q), sort = q.get('sort') || 'id', dir = q.get('dir') === 'desc' ? 'desc' : 'asc', per = [5, 10, 20].indexOf(+q.get('per')) >= 0 ? +q.get('per') : 10, mode = ['pages', 'more', 'virtual'].indexOf(q.get('mode')) >= 0 ? q.get('mode') : 'pages';
+  var rowsHtml = '';
+  for (var i = 1; i <= 3; i++) {
+    var c = cs.length >= i ? cs[i - 1] : { f: q.get('c' + i + 'f') || '', o: q.get('c' + i + 'o') || 'eq', v: q.get('c' + i + 'v') || '', v2: q.get('c' + i + 'v2') || '' };
+    rowsHtml += '<div class="crow"><select name="c' + i + 'f" aria-label="Condition ' + i + ' field">' + opt(Object.keys(FIELDS).map(function (k) { return [k, FIELDS[k].l]; }), c.f, '— field —') + '</select>' +
+      '<select name="c' + i + 'o" aria-label="Condition ' + i + ' operator">' + opt(Object.keys(OPS).map(function (k) { return [k, OPS[k]]; }), c.o) + '</select>' +
+      '<input type="text" name="c' + i + 'v" value="' + esc(c.v) + '" aria-label="Condition ' + i + ' value" placeholder="value">' +
+      '<input type="text" name="c' + i + 'v2" value="' + esc(c.v2) + '" aria-label="Condition ' + i + ' second value (between)" placeholder="to (between only)"></div>';
+  }
+  var viewBtn = function (v, l) { return '<a class="btn' + (view === v ? ' on' : '') + '" href="' + esc(href({ view: v })) + '" data-log="change_view" data-detail="' + v + '"' + (view === v ? ' aria-current="true"' : '') + ' aria-label="' + l + ' view">' + l + '</a>'; };
+  return shell('invoices', '<h1>Invoices</h1><p class="muted">Dataset: ' + esc(PRESETS[S.preset].name) + '</p>' +
+    '<form id="filterForm" class="panel" aria-label="Invoice filters"><input type="hidden" name="view" value="' + view + '">' +
+    '<div class="row"><div><label for="f-status">Status</label><select id="f-status" name="status" aria-label="Filter by status">' + opt(['Pending', 'Paid', 'Overdue'], q.get('status') || '', 'All statuses') + '</select></div>' +
+    '<div><label for="f-customer">Customer</label><input id="f-customer" type="text" name="customer" value="' + esc(q.get('customer') || '') + '" aria-label="Filter by customer"></div>' +
+    '<div><label for="f-id">Invoice ID</label><input id="f-id" type="text" name="invoiceId" value="' + esc(q.get('invoiceId') || '') + '" aria-label="Filter by invoice ID"></div>' +
+    '<div><label for="f-type">Document type</label><select id="f-type" name="type" aria-label="Filter by document type">' + opt(['Invoice', 'Credit Note', 'Statement'], q.get('type') || '', 'All types') + '</select></div></div>' +
+    '<h2 style="margin-top:14px;font-size:14px">Conditions <span class="muted" style="font-weight:400">(dates as YYYY-MM-DD)</span></h2>' + rowsHtml +
+    '<div class="row" style="margin-top:10px"><div><label for="f-logic">Combine conditions with</label><select id="f-logic" name="logic" aria-label="Combine conditions with">' + opt([['and', 'AND (all must match)'], ['or', 'OR (any can match)']], q.get('logic') === 'or' ? 'or' : 'and') + '</select></div>' +
+    '<div><label for="f-sort">Sort by</label><select id="f-sort" name="sort" data-auto="sort" aria-label="Sort by">' + opt([['id', 'Invoice ID'], ['amount', 'Amount'], ['invoiceDate', 'Invoice date'], ['customer', 'Customer'], ['status', 'Status']], sort) + '</select></div>' +
+    '<div><label for="f-dir">Direction</label><select id="f-dir" name="dir" data-auto="sort" aria-label="Sort direction">' + opt([['asc', 'Ascending'], ['desc', 'Descending']], dir) + '</select></div>' +
+    '<div><label for="f-per">Records per page</label><select id="f-per" name="per" data-auto="per" aria-label="Records per page">' + opt([5, 10, 20], per) + '</select></div>' +
+    '<div><label for="f-mode">List loading</label><select id="f-mode" name="mode" data-auto="mode" aria-label="List loading mode">' + opt([['pages', 'Pagination'], ['more', 'Load more'], ['virtual', 'Virtual scroll (list view)']], mode) + '</select></div>' +
+    '<div style="flex:none;display:flex;gap:8px"><button type="submit" class="btn primary" aria-label="Apply filters">Apply filters</button><a class="btn" aria-label="Clear filters" data-log="clear_filters" href="' + esc('?route=invoices&view=' + view + '&per=' + per + '&mode=' + mode) + '">Clear filters</a></div></div></form>' +
+    '<div class="toolbar"><div role="group" aria-label="Change view" style="display:flex;gap:6px">' + viewBtn('table', 'Table') + viewBtn('cards', 'Card') + viewBtn('list', 'List') + '</div>' +
+    '<div><span id="selCount" class="muted" data-testid="selected-count">' + S.selected.length + ' selected</span> <button type="button" id="bulkDownload" class="btn" aria-label="Download selected invoices">Download selected</button></div></div>' +
+    '<div id="collection" data-testid="invoice-collection"></div>');
+}
+
+function selBox(id) { return '<label class="sel"><input type="checkbox" data-select="' + esc(id) + '" aria-label="Select invoice ' + esc(id) + '"' + (S.selected.indexOf(id) >= 0 ? ' checked' : '') + '> Select</label>'; }
+function detailHref(id) { return '?route=invoice&id=' + encodeURIComponent(id) + '&back=' + encodeURIComponent(location.search.slice(1)); }
+function acts(r) {
+  return '<a class="btn" href="' + esc(detailHref(r.id)) + '" aria-label="Open invoice ' + esc(r.id) + '" data-testid="open-' + esc(r.id) + '">View Details</a>' +
+    (r.noDownload ? '' : '<button type="button" class="btn primary" data-download="' + esc(r.id) + '" aria-label="Download invoice ' + esc(r.id) + '" data-testid="download-' + esc(r.id) + '">Download PDF</button>');
+}
+function rowTr(r) {
+  return '<tr class="record" data-testid="invoice-row-' + esc(r.id) + '" data-record-id="' + esc(r.id) + '"><td>' + selBox(r.id) + '</td><th scope="row">' + esc(r.id) + '</th><td>' + esc(r.customer) + '</td><td>' + dash(r.invoiceDate) + '</td><td>' + dash(r.dueDate) + '</td><td>' + dash(r.type) + '</td><td>' + badge(r.status) + '</td><td class="num" data-amount="' + (r.amount == null ? '' : r.amount) + '">' + money(r.amount) + '</td><td><div class="acts">' + acts(r) + '</div></td></tr>';
+}
+function cardHtml(r) {
+  return '<article class="card record" role="listitem" data-testid="invoice-card-' + esc(r.id) + '" data-record-id="' + esc(r.id) + '"><div class="top2"><h3>' + esc(r.id) + '</h3>' + badge(r.status) + '</div><div>' + esc(r.customer) + '</div><div class="muted">Due ' + dash(r.dueDate) + '</div><div class="amt" data-amount="' + (r.amount == null ? '' : r.amount) + '">' + money(r.amount) + '</div><div class="acts">' + selBox(r.id) + acts(r) + '</div></article>';
+}
+function liHtml(r, style) {
+  return '<li class="record" data-testid="invoice-item-' + esc(r.id) + '" data-record-id="' + esc(r.id) + '"' + (style ? ' ' + style : '') + '>' + selBox(r.id) + '<b style="width:78px">' + esc(r.id) + '</b><span class="grow">' + esc(r.customer) + '</span>' + badge(r.status) + '<span style="width:100px;text-align:right" data-amount="' + (r.amount == null ? '' : r.amount) + '">' + money(r.amount) + '</span><span class="acts">' + acts(r) + '</span></li>';
+}
+
+var moreN = 1;
+function drawCollection() {
+  var q = Q(), view = ['table', 'cards', 'list'].indexOf(q.get('view')) >= 0 ? q.get('view') : 'table';
+  var sort = ['id', 'amount', 'invoiceDate', 'customer', 'status'].indexOf(q.get('sort')) >= 0 ? q.get('sort') : 'id', dir = q.get('dir') === 'desc' ? 'desc' : 'asc';
+  var per = [5, 10, 20].indexOf(+q.get('per')) >= 0 ? +q.get('per') : 10;
+  var mode = ['pages', 'more', 'virtual'].indexOf(q.get('mode')) >= 0 ? q.get('mode') : 'pages', note = '';
+  if (mode === 'virtual' && view !== 'list') { note = '<p class="muted">Virtual scroll only applies to List view — showing paginated results.</p>'; mode = 'pages'; }
+  var rows = sortRows(filterRows(q), sort, dir), total = rows.length, pages = Math.max(1, Math.ceil(total / per)), pg = Math.min(Math.max(parseInt(q.get('page'), 10) || 1, 1), pages);
+  var shown = mode === 'pages' ? rows.slice((pg - 1) * per, pg * per) : mode === 'more' ? rows.slice(0, per * moreN) : rows;
+  var body;
+  if (!total) body = '<p role="status" class="panel" data-testid="empty-state">No invoices match the current filters.</p>';
+  else if (mode === 'virtual') body = '<div id="vscroll" data-testid="virtual-scroller" tabindex="0" aria-label="Invoice list (virtual scroll)"><ul id="vinner" class="ilist" data-testid="invoice-list"></ul></div>';
+  else if (view === 'cards') body = '<div class="cards" role="list" data-testid="invoice-cards">' + shown.map(cardHtml).join('') + '</div>';
+  else if (view === 'list') body = '<ul class="ilist" data-testid="invoice-list">' + shown.map(function (r) { return liHtml(r); }).join('') + '</ul>';
+  else {
+    var th = function (k, l, cls) { var nd = (sort === k && dir === 'asc') ? 'desc' : 'asc', ind = sort === k ? (dir === 'asc' ? ' ▲' : ' ▼') : ''; return '<th scope="col" class="' + (cls || '') + '"' + (sort === k ? ' aria-sort="' + (dir === 'asc' ? 'ascending' : 'descending') + '"' : '') + '><a href="' + esc(href({ sort: k, dir: nd, page: '' })) + '" data-log="sort" data-detail="' + k + ' ' + nd + '" aria-label="Sort by ' + l + '">' + l + ind + '</a></th>'; };
+    body = '<div class="tablewrap"><table class="grid" data-testid="invoice-table" aria-label="Invoices"><thead><tr><th scope="col">Select</th>' + th('id', 'Invoice ID') + th('customer', 'Customer') + th('invoiceDate', 'Invoice date') + '<th scope="col">Due date</th><th scope="col">Type</th>' + th('status', 'Status') + th('amount', 'Amount', 'num') + '<th scope="col">Actions</th></tr></thead><tbody>' + shown.map(rowTr).join('') + '</tbody></table></div>';
+  }
+  var foot = '';
+  if (mode === 'pages') {
+    var lk = function (p, l, al) { return p < 1 || p > pages || p === pg ? '<button type="button" class="btn" disabled aria-label="' + al + '">' + l + '</button>' : '<a class="btn" href="' + esc(href({ page: p })) + '" aria-label="' + al + '" data-log="change_page" data-detail="page ' + p + '">' + l + '</a>'; };
+    foot = '<nav class="pager" aria-label="Pagination">' + lk(1, '« First', 'First page') + lk(pg - 1, '‹ Previous', 'Previous page') + '<span data-testid="current-page" aria-current="page">Page ' + pg + ' of ' + pages + '</span>' + lk(pg + 1, 'Next ›', 'Next page') + lk(pages, 'Last »', 'Last page') + '</nav>';
+  } else if (mode === 'more') {
+    foot = '<div class="pager">' + (shown.length < total ? '<button type="button" class="btn primary" data-action="more" aria-label="Load more invoices">Load more (' + (total - shown.length) + ' remaining)</button>' : '<span class="muted">All records loaded</span>') + '</div>';
+  } else foot = '<p class="muted pager">Only the visible window of rows exists in the DOM — scroll inside the list to load more.</p>';
+  var summary = mode === 'pages' ? (total ? 'Showing ' + ((pg - 1) * per + 1) + '–' + Math.min(pg * per, total) : 'Showing 0') : 'Showing ' + (mode === 'virtual' ? 'a window of' : shown.length);
+  $('#collection').innerHTML = note + '<p data-testid="record-count" aria-live="polite"><b>' + summary + ' of ' + total + ' records</b> <span class="muted">(Total records: ' + total + ')</span></p>' + body + foot;
+  if (mode === 'virtual' && total) mountVirtual(rows);
+}
+function mountVirtual(rows) {
+  var box = $('#vscroll'), inner = $('#vinner'), H = 64, VH = box.clientHeight || 420;
+  inner.style.height = rows.length * H + 'px';
+  var paint = function () { var s = Math.max(0, Math.floor(box.scrollTop / H) - 3), e = Math.min(rows.length, s + Math.ceil(VH / H) + 7); inner.innerHTML = rows.slice(s, e).map(function (r, i) { return liHtml(r, 'style="left:0;right:0;top:' + ((s + i) * H) + 'px;height:' + (H - 4) + 'px"'); }).join(''); };
+  box.addEventListener('scroll', function () { requestAnimationFrame(paint); }); paint();
+}
+
+function invoicePage() {
+  var q = Q(), id = q.get('id'), r = find(id), back = q.get('back');
+  var backHref = S.scenarios.returnFiltered && back && back.indexOf('route=invoices') === 0 ? '?' + back : '?route=invoices';
+  var retLink = '<a class="btn" href="' + esc(backHref) + '" aria-label="Return to invoices" data-log="return_to_collection" data-rid="' + esc(id || '') + '" data-detail="' + esc(backHref) + '">← Return to Invoices</a>';
+  if (!r) return shell('invoices', '<h1>Invoice not found</h1><p class="err" role="alert">No invoice with ID ' + esc(id) + ' exists in the current dataset.</p>' + retLink);
+  log('view_invoice', id, 'detail page');
+  var body = function () {
+    var items = lineItems(r);
+    return '<div class="panel" data-testid="invoice-detail" data-record-id="' + esc(r.id) + '"><div class="toolbar" style="margin-top:0"><h2 style="margin:0">' + esc(r.id) + ' ' + badge(r.status) + '</h2><div class="acts">' +
+      (r.noDownload ? '' : '<button type="button" class="btn primary" data-download="' + esc(r.id) + '" aria-label="Download invoice ' + esc(r.id) + ' PDF" data-testid="detail-download">Download PDF</button>') + '</div></div>' +
+      '<dl class="kv"><dt>Customer</dt><dd data-testid="detail-customer">' + esc(r.customer) + '</dd><dt>Document type</dt><dd>' + dash(r.type) + '</dd><dt>Invoice date</dt><dd>' + dash(r.invoiceDate) + '</dd><dt>Due date</dt><dd>' + dash(r.dueDate) + '</dd><dt>Amount</dt><dd data-testid="detail-amount">' + (r.amount == null ? '<span class="muted">—</span>' : money(r.amount)) + '</dd><dt>Payment method</dt><dd>' + dash(r.method) + '</dd><dt>Description</dt><dd>' + dash(r.description) + '</dd></dl></div>' +
+      '<div class="panel"><h2>Line items</h2><div class="tablewrap"><table class="grid"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>' + items.map(function (i) { return '<tr><td>' + esc(i[0]) + '</td><td class="num">' + i[1] + '</td><td class="num">' + (i[2] == null ? '—' : money(i[2])) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+  };
+  var delayed = S.scenarios.delayedDetail;
+  if (delayed) setTimeout(function () { var d = $('#detail'); if (d) d.innerHTML = body(); }, 2500);
+  return shell('invoices', '<p class="muted"><a href="?route=invoices">Invoices</a> / ' + esc(r.id) + '</p>' + '<div style="margin:10px 0">' + retLink + '</div><div id="detail">' + (delayed ? '<p role="status" data-testid="detail-loading">Loading invoice ' + esc(r.id) + ' …</p>' : body()) + '</div>');
+}
+
+function customersPage() {
+  var map = {}; data().forEach(function (r) { var c = map[r.customer] || (map[r.customer] = { n: 0, sum: 0 }); c.n++; c.sum += r.amount || 0; });
+  var names = Object.keys(map).sort(nat);
+  return shell('customers', '<h1>Customers</h1><p class="muted">' + names.length + ' customers in the current dataset</p><div class="tablewrap"><table class="grid" data-testid="customer-table"><thead><tr><th>Customer</th><th class="num">Invoices</th><th class="num">Total billed</th><th>Actions</th></tr></thead><tbody>' +
+    names.map(function (n, i) { return '<tr class="record" data-testid="customer-row-' + (i + 1) + '"><th scope="row">' + esc(n) + '</th><td class="num">' + map[n].n + '</td><td class="num">' + money(map[n].sum) + '</td><td><a class="btn" href="' + esc('?route=invoices&customer=' + encodeURIComponent(n) + '&view=table') + '" aria-label="View invoices for ' + esc(n) + '">View invoices</a></td></tr>'; }).join('') + '</tbody></table></div>');
+}
+function downloadsPage() {
+  var counts = {}; S.downloads.forEach(function (d) { counts[d.id] = (counts[d.id] || 0) + 1; });
+  var dups = Object.keys(counts).filter(function (k) { return counts[k] > 1; });
+  return shell('downloads', '<h1>Download Center</h1><p class="muted">Every PDF successfully served by this portal. Failed downloads appear in the Activity Log only.</p>' +
+    '<div class="stats"><div class="stat"><span class="muted">Total downloads</span><b data-testid="dl-total">' + S.downloads.length + '</b></div><div class="stat"><span class="muted">Unique invoices</span><b data-testid="dl-unique">' + Object.keys(counts).length + '</b></div><div class="stat"><span class="muted">Invoices downloaded more than once</span><b data-testid="dl-dups">' + dups.length + '</b></div></div>' +
+    '<div class="toolbar"><span class="muted">' + (dups.length ? 'Duplicates: ' + esc(dups.join(', ')) : 'No duplicate downloads.') + '</span><button type="button" id="clearDownloads" class="btn">Clear download history</button></div>' +
+    '<div class="tablewrap"><table class="grid"><thead><tr><th>Time</th><th>Invoice</th><th>File</th><th class="num">Times downloaded</th></tr></thead><tbody>' +
+    (S.downloads.length ? S.downloads.map(function (d) { return '<tr><td>' + esc(ts(d.t)) + '</td><td>' + esc(d.id) + '</td><td>' + esc(d.file) + '</td><td class="num">' + counts[d.id] + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="muted">No downloads yet.</td></tr>') + '</tbody></table></div>');
+}
+function activityPage() {
+  return shell('activity', '<h1>Activity Log</h1><p class="muted">Events recorded by this portal itself. This is not ReFlow\'s execution log — compare the two to check what the browser really did.</p><div class="toolbar"><span class="muted">' + S.log.length + ' events (newest first, max 500)</span><button type="button" id="clearLog" class="btn">Clear log</button></div>' +
+    '<div class="tablewrap"><table class="grid" data-testid="activity-table"><thead><tr><th>Timestamp</th><th>Event</th><th>Record</th><th>Details</th></tr></thead><tbody>' +
+    (S.log.length ? S.log.map(function (e) { return '<tr><td>' + esc(ts(e.t)) + '</td><td>' + esc(e.type) + '</td><td>' + esc(e.id) + '</td><td>' + esc(e.detail) + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="muted">No events yet.</td></tr>') + '</tbody></table></div>');
+}
+function testDataPage() {
+  var q = Q(), loaded = q.get('loaded');
+  return shell('testdata', '<h1>Test Data</h1><p class="muted">Loading a preset replaces the dataset with a deterministic starting state and clears selections and sort-flip. Activity log and download history are kept.</p>' +
+    (loaded && PRESETS[loaded] ? '<div class="okmsg" role="status" data-testid="reset-success">Dataset loaded: ' + esc(PRESETS[loaded].name) + '</div>' : '') +
+    '<div class="panel"><b>Current dataset:</b> <span data-testid="current-dataset">' + esc(PRESETS[S.preset].name) + '</span> — ' + S.base.length + ' records <button type="button" class="btn" data-load-preset="' + S.preset + '" aria-label="Reset current dataset" style="margin-left:10px">Reset current dataset</button></div>' +
+    '<div id="confirmBox" class="dlg" role="alertdialog" aria-labelledby="cbTitle" hidden><b id="cbTitle">Confirm dataset reset</b><p id="cbText"></p><button type="button" id="confirmReset" class="btn danger" aria-label="Confirm reset">Confirm reset</button> <button type="button" id="cancelReset" class="btn" aria-label="Cancel reset">Cancel</button></div>' +
+    '<div class="presets">' + Object.keys(PRESETS).map(function (k) { var p = PRESETS[k]; return '<div class="panel" style="margin:0" data-testid="preset-' + k + '"><h2>' + esc(p.name) + '</h2><p class="muted">' + esc(p.purpose) + '</p><p>' + p.build().length + ' records</p><button type="button" class="btn primary" data-load-preset="' + k + '" aria-label="Load ' + esc(p.name) + '">Load preset</button></div>'; }).join('') + '</div>');
+}
+function scenariosPage() {
+  var n = S.base.length, tg = function (i) { return S.base[Math.min(i, n - 1)] ? S.base[Math.min(i, n - 1)].id : '—'; };
+  return shell('scenarios', '<h1>Test Scenarios</h1><p class="muted">Deterministic switches — nothing fails unless you turn it on. Targets are chosen by position in the current dataset (datasets with fewer records fall back to the last record).</p>' +
+    '<div class="toolbar"><span></span><button type="button" id="disableAll" class="btn">Disable all (keep “returns to filtered collection” on)</button></div><div class="panel">' +
+    SCEN.map(function (s, i) { return '<div class="switch"><input type="checkbox" id="sc-' + s.k + '" data-scenario="' + s.k + '"' + (S.scenarios[s.k] ? ' checked' : '') + ' aria-label="' + esc(s.t) + '"><label for="sc-' + s.k + '" style="color:inherit;font-size:14px"><b>' + (i + 1) + '. ' + esc(s.t) + '</b><span class="muted">' + esc(s.d) + '</span>' + (s.at != null && s.k !== 'longDescription' && s.k !== 'specialChars' || ['longDescription', 'specialChars'].indexOf(s.k) >= 0 ? ' <span class="tag">target: ' + esc(tg(s.at != null ? s.at : (s.k === 'duplicateCustomer' ? 7 : 0))) + '</span>' : '') + '</label></div>'; }).join('') + '</div>');
+}
+
+/* ---------- router ---------- */
+function mount(html) { $('#app').innerHTML = html; }
+function main() {
+  var q = Q(), route = q.get('route') || 'dashboard', authed = !!ls.get(SESSION);
+  if (route === 'login') { if (authed) { location.replace('?route=dashboard'); return; } mount(loginPage()); return; }
+  if (!authed) { location.replace('?route=login'); return; }
+  var pages = { dashboard: dashboardPage, invoices: invoicesPage, invoice: invoicePage, customers: customersPage, downloads: downloadsPage, activity: activityPage, testdata: testDataPage, scenarios: scenariosPage };
+  if (!pages[route]) route = 'dashboard';
+  mount(pages[route]());
+  if (route === 'invoices') { log('open_collection', '', location.search); drawCollection(); }
+}
+
+/* ---------- events ---------- */
+var pendingPreset = null;
+document.addEventListener('click', function (e) {
+  var t = e.target, el;
+  if ((el = t.closest('[data-download]'))) { e.preventDefault(); download(el.getAttribute('data-download')); return; }
+  if ((el = t.closest('a[data-log]'))) log(el.getAttribute('data-log'), el.getAttribute('data-rid') || '', el.getAttribute('data-detail') || '');
+  if (t.closest('#logout')) { log('logout'); ls.del(SESSION); location.href = '?route=login'; return; }
+  if (t.closest('[data-action=more]')) { moreN++; log('load_more', '', 'batch ' + moreN); drawCollection(); return; }
+  if ((el = t.closest('[data-load-preset]'))) { pendingPreset = el.getAttribute('data-load-preset'); $('#cbText').textContent = 'Replace the current dataset with “' + PRESETS[pendingPreset].name + '”? Selections and sort-flip state will be cleared.'; $('#confirmBox').hidden = false; return; }
+  if (t.closest('#cancelReset')) { pendingPreset = null; $('#confirmBox').hidden = true; return; }
+  if (t.closest('#confirmReset') && pendingPreset) { var k = pendingPreset; S.base = PRESETS[k].build(); S.preset = k; S.selected = []; S.flip = false; log('reset_dataset', '', PRESETS[k].name); location.href = '?route=testdata&loaded=' + k; return; }
+  if (t.closest('#bulkDownload')) { S.selected.slice().forEach(function (id, i) { setTimeout(function () { download(id); }, i * 600); }); if (!S.selected.length) toast('No invoices selected', 'error'); return; }
+  if (t.closest('#clearLog')) { S.log = []; save(); main(); return; }
+  if (t.closest('#clearDownloads')) { S.downloads = []; save(); main(); return; }
+  if (t.closest('#disableAll')) { S.scenarios = defaultScen(); S.flip = false; save(); main(); return; }
+});
+document.addEventListener('change', function (e) {
+  var t = e.target, id;
+  if ((id = t.getAttribute && t.getAttribute('data-select'))) { var i = S.selected.indexOf(id); if (t.checked && i < 0) S.selected.push(id); if (!t.checked && i >= 0) S.selected.splice(i, 1); save(); var c = $('#selCount'); if (c) c.textContent = S.selected.length + ' selected'; return; }
+  if (t.getAttribute && t.getAttribute('data-scenario')) { S.scenarios[t.getAttribute('data-scenario')] = t.checked; S.flip = false; save(); return; }
+  if (t.getAttribute && t.getAttribute('data-auto')) { var f = $('#filterForm'); f.setAttribute('data-src', t.getAttribute('data-auto')); f.requestSubmit(); }
+});
+document.addEventListener('submit', function (e) {
+  var f = e.target;
+  if (f.id === 'loginForm') {
+    e.preventDefault();
+    var em = f.email.value.trim(), pw = f.password.value;
+    if (!em || !pw) { mount(loginPage('Email and password are required.')); return; }
+    if (em !== 'admin@demo.local' || pw !== 'Demo123!') { mount(loginPage('Invalid email or password.')); return; }
+    ls.set(SESSION, '1'); log('login', '', em); location.href = '?route=dashboard'; return;
+  }
+  if (f.id === 'filterForm') {
+    e.preventDefault();
+    var fd = new FormData(f), p = new URLSearchParams(), cur = Q();
+    p.set('route', 'invoices');
+    fd.forEach(function (v, k) { v = String(v).trim(); if (v === '') return; if (/^c\d[fo]$/.test(k)) return; p.set(k, v); });
+    for (var i = 1; i <= 3; i++) { var fl = fd.get('c' + i + 'f'), v1 = String(fd.get('c' + i + 'v') || '').trim(), v2 = String(fd.get('c' + i + 'v2') || '').trim(); if (fl && (v1 || v2)) { p.set('c' + i + 'f', fl); p.set('c' + i + 'o', fd.get('c' + i + 'o')); } }
+    if (p.get('logic') === 'and' && !Array.from(p.keys()).some(function (k) { return /^c\d/.test(k); })) p.delete('logic');
+    var src = f.getAttribute('data-src') || 'filters'; f.removeAttribute('data-src');
+    var type = { sort: 'sort', per: 'change_page_size', mode: 'change_mode' }[src] || 'apply_filters';
+    if (src === 'mode') cur.set('mode', p.get('mode') || 'pages');
+    log(type, '', p.toString());
+    location.href = '?' + p.toString();
+  }
+});
+
+window.RTP = { makePdf: makePdf, data: data, filterRows: function (qs) { return filterRows(new URLSearchParams(qs)); }, PRESETS: PRESETS };
+main();
+})();
+</script>
+</body>
 </html>

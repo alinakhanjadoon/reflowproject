@@ -305,46 +305,26 @@ class RunnerDaemon {
       const candidateStepIdx = LoopDetector.findLoopCandidateIndex(steps);
       const stepsHasLoop = steps.some(s => s && (s.role === 'LOOP' || s.isLoop || s.loopMode === 'sequential_iteration'));
 
-      const isLoop = Boolean(
-        run.is_loop === true ||
-        run.isLoop === true ||
-        run.mode === 'loop' ||
+      const isExplicitSingle = run.mode === 'single' || run.is_loop === false || run.isLoop === false;
+      const isExplicitLoop = run.mode === 'loop' || run.is_loop === true || run.isLoop === true;
+
+      const isLoop = !isExplicitSingle && (isExplicitLoop || Boolean(
         def.metadata?.isLoop === true ||
         def.isLoop === true ||
         def.mode === 'loop' ||
         metadata.isLoop === true ||
         workflow?.isLoop === true ||
         stepsHasLoop ||
-        (candidateStepIdx >= 0 && (run.mode === 'loop' || def.mode === 'loop' || !run.mode))
-      );
+        (candidateStepIdx >= 0 && def.mode === 'loop')
+      ));
       const mode = (run.mode === 'loop' || run.mode === 'single')
         ? run.mode
         : (isLoop ? 'loop' : (def.mode || 'single'));
 
-      // Safely resolve filter object from candidate rules
-      function resolveCandidateFilter(candidate) {
-        if (!candidate || typeof candidate !== 'object') return null;
-        if (candidate.itemFilter) return resolveCandidateFilter(candidate.itemFilter);
-        if (Array.isArray(candidate.conditions) && candidate.conditions.length > 0) return candidate;
-        if (candidate.field || candidate.column || candidate.filterValue) return candidate;
-        return null;
-      }
-
       // Resolve filter and loop parameters from run, definition, and filter_rules
-      const rawRunFilter = run.itemFilter ?? run.item_filter ?? null;
-      const rawDefFilter = def.itemFilter ?? null;
-      const rawWfFilter = resolveCandidateFilter(workflow?.filter_rules) ?? resolveCandidateFilter(def.filter_rules) ?? null;
-
-      const itemFilter = (rawRunFilter !== null && rawRunFilter !== undefined)
-        ? rawRunFilter
-        : ((rawDefFilter !== null && rawDefFilter !== undefined)
-            ? rawDefFilter
-            : rawWfFilter);
-
-      const rowFilter = run.rowFilter ??
-        run.row_filter ??
-        def.rowFilter ??
-        itemFilter;
+      const { resolveItemFilter } = require('../shared/item-filter');
+      const itemFilter = resolveItemFilter(run, workflow, def);
+      const rowFilter = run.rowFilter ?? run.row_filter ?? def.rowFilter ?? itemFilter;
 
       const loopLimit = run.loopLimit ??
         run.loop_limit ??

@@ -601,16 +601,15 @@ class RecorderBridge {
       if (rawAction.isUncheck === true || rawAction.action === 'UNCHECK') {
         desiredState = false;
       } else if (rawAction.desiredState !== undefined) {
-        if (rawAction.desiredState === false && rawAction.target?.fingerprint?.checked !== true) {
-          // Element was not checked prior to click; clicking it was meant to check it (default ON)
-          desiredState = true;
-        } else {
-          desiredState = Boolean(rawAction.desiredState);
-        }
+        desiredState = Boolean(rawAction.desiredState);
       } else if (rawAction.checked !== undefined) {
         desiredState = Boolean(rawAction.checked);
+      } else if (rawAction.meta?.checked !== undefined) {
+        desiredState = Boolean(rawAction.meta.checked);
+      } else if (rawAction.target?.fingerprint?.checked === true || rawAction.target?.checked === true) {
+        desiredState = false; // Backward compatibility: target was already checked prior to click
       } else {
-        desiredState = true; // Default ON for any checkbox interaction
+        desiredState = true; // Default ON for clicking an unchecked checkbox
       }
     } else if (rawAction.desiredState !== undefined) {
       desiredState = Boolean(rawAction.desiredState);
@@ -636,7 +635,16 @@ class RecorderBridge {
       target: rawAction.target,
       ...(rawAction.url ? { url: rawAction.url } : {}),
       ...(rawAction.frame ? { frame: rawAction.frame } : {}),
-      ...(isCheckbox ? { isCheckbox: true, desiredState: desiredState !== false, checked: desiredState !== false } : (desiredState !== undefined ? { desiredState: Boolean(desiredState), checked: Boolean(desiredState) } : {})),
+      ...(isCheckbox ? {
+        isCheckbox: true,
+        desiredState: desiredState,
+        checked: desiredState,
+        ...(desiredState === false ? { isUncheck: true } : {})
+      } : (desiredState !== undefined ? {
+        desiredState: Boolean(desiredState),
+        checked: Boolean(desiredState),
+        ...(desiredState === false ? { isUncheck: true } : {})
+      } : {})),
       ...(rawAction.key ? { key: rawAction.key } : {}),
       ...(rawAction.value !== undefined ? { value: rawAction.value } : {}),
       ...(rawAction.scrollX !== undefined ? { scrollX: rawAction.scrollX } : {}),

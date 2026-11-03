@@ -668,4 +668,613 @@ describe('Simple, User-Controlled Looping (v1.0)', () => {
       assert.match(missingField.reason, /missing/i);
     });
   });
+
+  describe('7. Five-Record Deterministic Execution & Navigation Preservation', () => {
+    const ItemDiscovery = require('../src/shared/item-discovery');
+
+    const createMockElementHandle = () => {
+      const handle = {
+        asElement: () => handle,
+        evaluateHandle: async () => handle,
+        evaluate: async () => true,
+        click: async () => {},
+        dispose: async () => {}
+      };
+      return handle;
+    };
+
+    const createMockPage = (initialUrl, overrides = {}) => {
+      let currentUrl = initialUrl;
+      const page = {
+        url: () => currentUrl,
+        goto: async (url) => { currentUrl = url; },
+        goBack: async () => {},
+        bringToFront: async () => {},
+        keyboard: { press: async () => {} },
+        mainFrame: () => ({}),
+        waitForSelector: async () => ({}),
+        evaluate: async () => true,
+        evaluateHandle: async () => createMockElementHandle(),
+        browser: () => ({ pages: async () => [page] }),
+        ...overrides
+      };
+      return page;
+    };
+
+    test('Five-record workflow: Setup executes 1x, loop body executes 5x, Teardown executes 1x, Zero returns to Home', async () => {
+      const executedSetupSteps = [];
+      const executedLoopActions = [];
+      const executedTeardownSteps = [];
+      const navigationsToHome = [];
+      let currentUrl = 'https://portal.example.com/home';
+
+      const mockPage = createMockPage(currentUrl, {
+        url: () => currentUrl,
+        goto: async (url) => {
+          if (url.includes('/home')) navigationsToHome.push(url);
+          currentUrl = url;
+        },
+        goBack: async () => {
+          currentUrl = 'https://portal.example.com/invoices?status=pending';
+        }
+      });
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_five_records_no_home',
+        runsDir: '/tmp',
+        loop: {
+          enabled: true,
+          anchorStepIndex: 3,
+          startStepIndex: 3,
+          endStepIndex: 6
+        }
+      });
+
+      // Workflow configuration with Setup (0..2), Loop (3..6), Teardown (7)
+      const workflow = {
+        id: 'wf_5_invoices',
+        name: 'Process 5 Invoices',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open Portal', url: 'https://portal.example.com/home' }, // 0: Setup
+          { type: 'CLICK', name: 'Navigate to Invoices' },                                   // 1: Setup
+          { type: 'CLICK', name: 'Apply Pending Filter' },                                   // 2: Setup
+          { type: 'CLICK', name: 'Select Current Invoice' },                                 // 3: Loop Anchor (Start)
+          { type: 'CLICK', name: 'Open Details' },                                           // 4: Loop
+          { type: 'CLICK', name: 'Download PDF' },                                           // 5: Loop
+          { type: 'CLICK', name: 'Return to Invoice Collection' },                           // 6: Loop (End)
+          { type: 'CLICK', name: 'Generate Final Report' }                                   // 7: Teardown
+        ],
+        loop: {
+          enabled: true,
+          anchorStepIndex: 3,
+          startStepIndex: 3,
+          endStepIndex: 6
+        }
+      };
+
+      // Mock replay engine to track exact action executions
+      runner.replayEngine = {
+        browser: {
+          pages: async () => [mockPage]
+        },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async (action, index) => {
+          if (index < 3) {
+            executedSetupSteps.push({ name: action.name, index });
+            if (index === 0) currentUrl = 'https://portal.example.com/home';
+            if (index === 1) currentUrl = 'https://portal.example.com/invoices';
+            if (index === 2) currentUrl = 'https://portal.example.com/invoices?status=pending';
+          } else if (index >= 7) {
+            executedTeardownSteps.push({ name: action.name, index });
+          } else {
+            executedLoopActions.push({ name: action.name, index });
+            if (index === 4) currentUrl = 'https://portal.example.com/invoices/detail';
+            if (index === 6) currentUrl = 'https://portal.example.com/invoices?status=pending';
+          }
+        },
+        executeActionWithinItem: async (el, action, index) => {
+          executedLoopActions.push({ name: action.name, index, scope: 'item' });
+        },
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+      runner.checkIfAlreadyDownloaded = () => ({ isDuplicate: false });
+      runner.isCollectionPresent = async () => true;
+      runner.snapshotDownloadedFiles = () => ({ runFiles: [], osFiles: [] });
+      runner.waitForDownload = async () => [{ filename: 'invoice.pdf', path: '/tmp/invoice.pdf' }];
+
+      // Mock 5 discovered invoices
+      const mockDiscovery = {
+        success: true,
+        itemCount: 5,
+        confidence: 0.95,
+        collection: { itemTag: 'tr', collectionType: 'table-row', ancestorSelector: 'table.invoices-table' },
+        items: [
+          { index: 0, text: 'INV-001 $500 Pending', fields: { 'Invoice No': 'INV-001', 'Status': 'Pending' }, itemIdentifier: { itemLabel: 'INV-001', itemKey: 'inv_1' } },
+          { index: 1, text: 'INV-002 $750 Pending', fields: { 'Invoice No': 'INV-002', 'Status': 'Pending' }, itemIdentifier: { itemLabel: 'INV-002', itemKey: 'inv_2' } },
+          { index: 2, text: 'INV-003 $1200 Pending', fields: { 'Invoice No': 'INV-003', 'Status': 'Pending' }, itemIdentifier: { itemLabel: 'INV-003', itemKey: 'inv_3' } },
+          { index: 3, text: 'INV-004 $300 Pending', fields: { 'Invoice No': 'INV-004', 'Status': 'Pending' }, itemIdentifier: { itemLabel: 'INV-004', itemKey: 'inv_4' } },
+          { index: 4, text: 'INV-005 $900 Pending', fields: { 'Invoice No': 'INV-005', 'Status': 'Pending' }, itemIdentifier: { itemLabel: 'INV-005', itemKey: 'inv_5' } }
+        ]
+      };
+
+      const origDiscover = ItemDiscovery.discover;
+      ItemDiscovery.discover = async () => mockDiscovery;
+
+      try {
+        const result = await runner.start(workflow);
+
+        // 1. Verify workflow completed successfully
+        assert.equal(result.status, 'COMPLETED');
+        assert.equal(result.itemsSucceeded, 5);
+        assert.equal(result.itemsFailed, 0);
+
+        // 2. Setup steps executed EXACTLY once
+        assert.equal(executedSetupSteps.length, 3, 'Setup steps must execute exactly 3 times in total (1 per step)');
+        assert.deepEqual(executedSetupSteps.map(s => s.name), [
+          'Open Portal',
+          'Navigate to Invoices',
+          'Apply Pending Filter'
+        ]);
+
+        // 3. Teardown steps executed EXACTLY once
+        assert.equal(executedTeardownSteps.length, 1, 'Teardown steps must execute exactly once');
+        assert.equal(executedTeardownSteps[0].name, 'Generate Final Report');
+
+        // 4. ZERO returns to Home between records!
+        assert.equal(navigationsToHome.length, 0, 'Must NEVER navigate to portal Home between records');
+
+        // 5. Collection URL was preserved
+        assert.equal(runner.collectionUrl, 'https://portal.example.com/invoices?status=pending');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+
+    test('Pattern 1 (Same-page actions): Row actions without navigation do zero reloads or history back calls', async () => {
+      let gotoCount = 0;
+      let goBackCount = 0;
+      let currentUrl = 'https://portal.example.com/invoices?status=pending';
+
+      const mockPage = createMockPage(currentUrl, {
+        url: () => currentUrl,
+        goto: async (url) => { gotoCount++; currentUrl = url; },
+        goBack: async () => { goBackCount++; }
+      });
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_pattern1_same_page',
+        runsDir: '/tmp',
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      });
+
+      const workflow = {
+        id: 'wf_same_page',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open Invoices', url: currentUrl }, // 0: Setup
+          { type: 'CLICK', name: 'Select Row' },                        // 1: Loop
+          { type: 'CLICK', name: 'Direct Download Row PDF' }            // 2: Loop
+        ],
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      };
+
+      runner.replayEngine = {
+        browser: { pages: async () => [mockPage] },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async () => {},
+        executeActionWithinItem: async () => {},
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+      runner.checkIfAlreadyDownloaded = () => ({ isDuplicate: false });
+      runner.isCollectionPresent = async () => true;
+      runner.snapshotDownloadedFiles = () => ({ runFiles: [], osFiles: [] });
+      runner.waitForDownload = async () => [{ filename: 'invoice.pdf', path: '/tmp/invoice.pdf' }];
+
+      const ItemDiscovery = require('../src/shared/item-discovery');
+      const origDiscover = ItemDiscovery.discover;
+      ItemDiscovery.discover = async () => ({
+        success: true,
+        itemCount: 3,
+        confidence: 0.95,
+        collection: { itemTag: 'tr' },
+        items: [
+          { index: 0, text: 'INV-1', fields: {}, itemIdentifier: { itemLabel: 'INV-1', itemKey: '1' } },
+          { index: 1, text: 'INV-2', fields: {}, itemIdentifier: { itemLabel: 'INV-2', itemKey: '2' } },
+          { index: 2, text: 'INV-3', fields: {}, itemIdentifier: { itemLabel: 'INV-3', itemKey: '3' } }
+        ]
+      });
+
+      try {
+        const result = await runner.start(workflow);
+        assert.equal(result.status, 'COMPLETED');
+        assert.equal(result.itemsSucceeded, 3);
+        // After setup, same-page actions must NOT call goto or goBack!
+        assert.equal(gotoCount, 0, 'Pattern 1 must not call page.goto between records');
+        assert.equal(goBackCount, 0, 'Pattern 1 must not call page.goBack between records');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+
+    test('Pattern 2 (Detail-page navigation): Automatically restores collection view via history.back or collection URL', async () => {
+      let goBackCalls = 0;
+      let currentUrl = 'https://portal.example.com/invoices?filter=active';
+
+      const mockPage = createMockPage(currentUrl, {
+        url: () => currentUrl,
+        goto: async (url) => { currentUrl = url; },
+        goBack: async () => {
+          goBackCalls++;
+          currentUrl = 'https://portal.example.com/invoices?filter=active';
+        }
+      });
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_pattern2_detail_nav',
+        runsDir: '/tmp',
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      });
+
+      const workflow = {
+        id: 'wf_detail_nav',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open List', url: currentUrl }, // 0: Setup
+          { type: 'CLICK', name: 'Open Details Page' },              // 1: Loop (leaves list)
+          { type: 'CLICK', name: 'Download Detail PDF' }             // 2: Loop
+          // Note: No recorded return step! Engine must restore collection context automatically
+        ],
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      };
+
+      runner.replayEngine = {
+        browser: { pages: async () => [mockPage] },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async (action, index) => {
+          if (index === 1) currentUrl = 'https://portal.example.com/invoices/detail/100';
+        },
+        executeActionWithinItem: async (el, action, index) => {
+          if (index === 1) currentUrl = 'https://portal.example.com/invoices/detail/100';
+        },
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+      runner.checkIfAlreadyDownloaded = () => ({ isDuplicate: false });
+      runner.isCollectionPresent = async () => currentUrl.includes('/invoices?filter=active');
+      runner.snapshotDownloadedFiles = () => ({ runFiles: [], osFiles: [] });
+      runner.waitForDownload = async () => [{ filename: 'detail.pdf', path: '/tmp/detail.pdf' }];
+
+      const ItemDiscovery = require('../src/shared/item-discovery');
+      const origDiscover = ItemDiscovery.discover;
+      ItemDiscovery.discover = async () => ({
+        success: true,
+        itemCount: 2,
+        confidence: 0.9,
+        collection: { itemTag: 'tr' },
+        items: [
+          { index: 0, text: 'Item 1', fields: {}, itemIdentifier: { itemLabel: 'Item 1', itemKey: '1' } },
+          { index: 1, text: 'Item 2', fields: {}, itemIdentifier: { itemLabel: 'Item 2', itemKey: '2' } }
+        ]
+      });
+
+      try {
+        const result = await runner.start(workflow);
+        assert.equal(result.status, 'COMPLETED');
+        assert.equal(result.itemsSucceeded, 2);
+        assert.ok(goBackCalls >= 2, 'History back must be called to restore collection view after detail navigation');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+
+    test('Collection restoration failure stops cleanly: Invoice 1 succeeds, restoration fails, Invoice 2 and 3 not executed, zero Home returns, explicit error', async () => {
+      const executedSetupSteps = [];
+      const executedLoopItems = [];
+      const navigationsToHome = [];
+      let teardownExecuted = false;
+      let currentUrl = 'https://portal.example.com/home';
+      let invoice1Finished = false;
+
+      const mockPage = createMockPage(currentUrl, {
+        url: () => currentUrl,
+        goto: async (url) => {
+          if (url.includes('/home')) navigationsToHome.push(url);
+          currentUrl = url;
+        },
+        goBack: async () => {
+          currentUrl = 'https://portal.example.com/invoices';
+        }
+      });
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_clean_restoration_failure',
+        runsDir: '/tmp',
+        loop: { enabled: true, anchorStepIndex: 2, startStepIndex: 2, endStepIndex: 2 }
+      });
+
+      const workflow = {
+        id: 'wf_restoration_fail',
+        name: 'Restoration Failure Workflow',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open Portal', url: 'https://portal.example.com/home' }, // 0: Setup
+          { type: 'CLICK', name: 'Navigate to Invoices' },                                   // 1: Setup
+          { type: 'CLICK', name: 'Process Invoice' },                                        // 2: Loop Anchor
+          { type: 'CLICK', name: 'Teardown Summary' }                                        // 3: Teardown
+        ],
+        loop: { enabled: true, anchorStepIndex: 2, startStepIndex: 2, endStepIndex: 2 }
+      };
+
+      runner.replayEngine = {
+        browser: { pages: async () => [mockPage] },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async (action, index) => {
+          if (index < 2) {
+            executedSetupSteps.push({ name: action.name, index });
+            if (index === 0) currentUrl = 'https://portal.example.com/home';
+            if (index === 1) currentUrl = 'https://portal.example.com/invoices';
+          } else if (index === 3) {
+            teardownExecuted = true;
+          }
+        },
+        executeActionWithinItem: async (el, action, index) => {
+          const activeItem = runner._activeItemContext;
+          executedLoopItems.push(activeItem?.itemLabel || `Item-${activeItem?.index + 1}`);
+          // Invoice 1 finishes its work, and subsequent collection restoration fails
+          invoice1Finished = true;
+        },
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+      runner.checkIfAlreadyDownloaded = () => ({ isDuplicate: false });
+      // Collection is present during discovery, but after Invoice 1 completes, it cannot be restored!
+      runner.isCollectionPresent = async () => {
+        return !invoice1Finished;
+      };
+      runner.snapshotDownloadedFiles = () => ({ runFiles: [], osFiles: [] });
+      runner.waitForDownload = async () => [{ filename: 'f.pdf', path: '/tmp/f.pdf' }];
+
+      const ItemDiscovery = require('../src/shared/item-discovery');
+      const origDiscover = ItemDiscovery.discover;
+      ItemDiscovery.discover = async () => ({
+        success: true,
+        itemCount: 3,
+        confidence: 0.9,
+        collection: { itemTag: 'tr', collectionType: 'table-row' },
+        items: [
+          { index: 0, text: 'INV-001', fields: { 'Invoice No': 'INV-001' }, itemIdentifier: { itemLabel: 'INV-001', itemKey: 'inv_1' } },
+          { index: 1, text: 'INV-002', fields: { 'Invoice No': 'INV-002' }, itemIdentifier: { itemLabel: 'INV-002', itemKey: 'inv_2' } },
+          { index: 2, text: 'INV-003', fields: { 'Invoice No': 'INV-003' }, itemIdentifier: { itemLabel: 'INV-003', itemKey: 'inv_3' } }
+        ]
+      });
+
+      try {
+        const result = await runner.start(workflow);
+
+        // 1. Invoice 1 completes successfully
+        assert.equal(executedLoopItems.length, 1, 'Only Invoice 1 must have executed');
+        assert.equal(executedLoopItems[0], 'INV-001');
+
+        // 2 & 7. Previously successful records remain correctly reported as successful
+        assert.equal(result.itemsSucceeded, 1, 'Invoice 1 must be counted as succeeded');
+        assert.equal(result.results.length, 1);
+        assert.equal(result.results[0].status, 'SUCCESS');
+        assert.equal(result.results[0].itemKey, 'invoice:INV-001');
+        assert.equal(result.results[0].label, 'INV-001');
+
+        // 3. Invoice 2 and Invoice 3 were NOT executed
+        assert.ok(!executedLoopItems.includes('INV-002'), 'Invoice 2 must not be executed');
+        assert.ok(!executedLoopItems.includes('INV-003'), 'Invoice 3 must not be executed');
+
+        // 4. Setup steps are NOT replayed
+        assert.equal(executedSetupSteps.length, 2, 'Setup steps must execute exactly once and never be replayed');
+        assert.deepEqual(executedSetupSteps.map(s => s.name), ['Open Portal', 'Navigate to Invoices']);
+
+        // 5. The browser does NOT navigate to Home
+        assert.equal(navigationsToHome.length, 0, 'Must NEVER navigate to portal Home on restoration failure');
+
+        // 6. The execution reports an incomplete/failed loop with an explicit restoration error
+        assert.equal(result.status, 'FAILED', 'Run must report FAILED (not COMPLETED) on restoration failure');
+        assert.match(result.error, /Collection restoration failed/i, 'Must report explicit restoration error');
+
+        // 8. Teardown follows existing error policy and does not run upon restoration failure
+        assert.equal(teardownExecuted, false, 'Teardown must not execute when loop fails prematurely due to restoration error');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+
+    test('Zero matching records: Setup executes 1x, Loop executes 0x, Teardown executes 1x', async () => {
+      let setupExecuted = false;
+      let teardownExecuted = false;
+      let loopExecuted = false;
+
+      const mockPage = createMockPage('https://portal.example.com/invoices');
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_zero_records',
+        runsDir: '/tmp',
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      });
+
+      const workflow = {
+        id: 'wf_zero_records',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open Invoices' }, // 0: Setup
+          { type: 'CLICK', name: 'Row Action' },       // 1: Loop
+          { type: 'CLICK', name: 'Row PDF' },          // 2: Loop
+          { type: 'CLICK', name: 'Teardown Summary' }  // 3: Teardown
+        ],
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      };
+
+      runner.replayEngine = {
+        browser: { pages: async () => [mockPage] },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async (action, index) => {
+          if (index === 0) setupExecuted = true;
+          if (index === 1 || index === 2) loopExecuted = true;
+          if (index === 3) teardownExecuted = true;
+        },
+        executeActionWithinItem: async () => { loopExecuted = true; },
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+
+      const ItemDiscovery = require('../src/shared/item-discovery');
+      const origDiscover = ItemDiscovery.discover;
+      // Collection exists but has 0 items
+      ItemDiscovery.discover = async () => ({
+        success: true,
+        itemCount: 0,
+        items: []
+      });
+
+      try {
+        const result = await runner.start(workflow);
+        assert.equal(setupExecuted, true, 'Setup must execute once');
+        assert.equal(loopExecuted, false, 'Loop actions must not execute when 0 records match');
+        assert.equal(teardownExecuted, true, 'Teardown must execute once');
+        assert.equal(result.status, 'COMPLETED');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+
+    test('One failed download reports failure for that item and continues to next record without context pollution', async () => {
+      const processedItems = [];
+      let currentUrl = 'https://portal.example.com/invoices';
+
+      const mockPage = createMockPage(currentUrl, {
+        url: () => currentUrl,
+        goto: async (url) => { currentUrl = url; }
+      });
+
+      const runner = new LoopReplayRunner({
+        runId: 'test_one_failure_no_pollution',
+        runsDir: '/tmp',
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      });
+
+      const workflow = {
+        id: 'wf_one_fail',
+        steps: [
+          { type: 'NAVIGATE', name: 'Open Invoices' }, // 0: Setup
+          { type: 'CLICK', name: 'Row Action' },       // 1: Loop
+          { type: 'CLICK', name: 'Row PDF' }           // 2: Loop
+        ],
+        loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+      };
+
+      runner.replayEngine = {
+        browser: { pages: async () => [mockPage] },
+        connect: async () => runner.replayEngine.browser,
+        page: mockPage,
+        executeAction: async () => {},
+        executeActionWithinItem: async (el, action) => {
+          if (runner._activeItemContext && runner._activeItemContext.index === 1) {
+            throw new Error('Download timeout for Item 2');
+          }
+          processedItems.push(action.name);
+        },
+        dismissOverlays: async () => {},
+        disconnect: async () => {},
+        _ensureSelectorResolverInFrame: async () => {},
+        resetExtractedRowFields: () => {}
+      };
+
+      runner.configureDownloadInterception = async () => {};
+      runner.navigateToWorkflowTarget = async () => {};
+      runner.initDirectories = () => {};
+      runner.writeLoopCheckpoint = () => {};
+      runner.loadLoopCheckpoint = () => null;
+      runner._syncSubManagers = () => {};
+      runner.checkIfAlreadyDownloaded = () => ({ isDuplicate: false });
+      runner.isCollectionPresent = async () => true;
+      runner.snapshotDownloadedFiles = () => ({ runFiles: [], osFiles: [] });
+      // Item 1 succeeds, Item 2 fails download, Item 3 succeeds
+      runner.waitForDownload = async () => {
+        if (runner._activeItemContext && runner._activeItemContext.i === 1) {
+          throw new Error('Download timeout for Item 2');
+        }
+        return [{ filename: 'invoice.pdf', path: '/tmp/invoice.pdf' }];
+      };
+
+      const ItemDiscovery = require('../src/shared/item-discovery');
+      const origDiscover = ItemDiscovery.discover;
+      ItemDiscovery.discover = async () => ({
+        success: true,
+        itemCount: 3,
+        confidence: 0.95,
+        collection: { itemTag: 'tr' },
+        items: [
+          { index: 0, text: 'INV-1', fields: {}, itemIdentifier: { itemLabel: 'INV-1', itemKey: '1' } },
+          { index: 1, text: 'INV-2', fields: {}, itemIdentifier: { itemLabel: 'INV-2', itemKey: '2' } },
+          { index: 2, text: 'INV-3', fields: {}, itemIdentifier: { itemLabel: 'INV-3', itemKey: '3' } }
+        ]
+      });
+
+      try {
+        const result = await runner.start(workflow);
+        assert.equal(result.status, 'COMPLETED_WITH_ERRORS');
+        assert.equal(result.itemsSucceeded, 2);
+        assert.equal(result.itemsFailed, 1);
+        // Verify Item 3 was processed cleanly despite Item 2 failure
+        assert.equal(result.results[0].status, 'SUCCESS');
+        assert.equal(result.results[1].status, 'FAILED');
+        assert.equal(result.results[2].status, 'SUCCESS');
+      } finally {
+        ItemDiscovery.discover = origDiscover;
+      }
+    });
+  });
 });
+

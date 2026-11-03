@@ -258,5 +258,87 @@ console.log('🧪 Starting Multi-Checkbox Default ON & Workflow Execution Tests.
   assert.strictEqual(multiSelectState.opt2Selected, true, 'Option 2 still selected');
   console.log('  ✅ Option repeat correctly preserves both selections without toggling off!');
 
-  console.log('\n🎉 ALL MULTI-CHECKBOX DEFAULT ON TESTS PASSED PERFECTLY!\n');
+  // ============================================================
+  // Test 5: Unchecking an initially checked checkbox faithfully unchecks it
+  // ============================================================
+  console.log('\n🔹 Test 5: Explicit uncheck action faithfully sets desiredState=false');
+
+  const uncheckState = {
+    row1Checked: true,  // Initially checked
+    row2Checked: false, // Initially unchecked
+    row1Clicks: 0,
+    row2Clicks: 0
+  };
+
+  const createRowCbHandle = (key, clickKey) => ({
+    evaluate: async (fn, ...args) => {
+      const mockEl = {
+        tagName: 'INPUT',
+        type: 'checkbox',
+        get checked() { return uncheckState[key]; },
+        offsetWidth: 20,
+        offsetHeight: 20,
+        getClientRects: () => [{ width: 20, height: 20 }],
+        closest: () => null,
+        querySelector: () => null,
+        getAttribute: () => null,
+        classList: { contains: () => false }
+      };
+      return fn(mockEl, ...args);
+    },
+    evaluateHandle: async () => null,
+    click: async () => {
+      uncheckState[clickKey]++;
+      uncheckState[key] = !uncheckState[key];
+    },
+    boundingBox: async () => ({ x: 10, y: 10, width: 20, height: 20 })
+  });
+
+  const row1Handle = createRowCbHandle('row1Checked', 'row1Clicks');
+  const row2Handle = createRowCbHandle('row2Checked', 'row2Clicks');
+
+  // Step A: User records unchecking Row 1
+  const bridgeUncheck = new RecorderBridge({ name: 'test-uncheck', outputDir: './test-output' });
+  bridgeUncheck.isRecording = true;
+  bridgeUncheck._handleCapturedAction({
+    type: 'CLICK',
+    timestamp: Date.now(),
+    desiredState: false,
+    checked: false,
+    isUncheck: true,
+    target: {
+      friendlyName: 'Row 1 Checkbox',
+      candidates: [{ strategy: 'css-path', value: '#row1' }],
+      fingerprint: { tagName: 'input', type: 'checkbox', isCheckbox: true, checked: false }
+    }
+  });
+
+  assert.strictEqual(bridgeUncheck.actions[0].desiredState, false, 'Uncheck action must preserve desiredState=false');
+  assert.strictEqual(bridgeUncheck.actions[0].checked, false, 'Uncheck action must preserve checked=false');
+  assert.strictEqual(bridgeUncheck.actions[0].isUncheck, true, 'Uncheck action must preserve isUncheck=true');
+
+  // Step B: Execute uncheck Row 1 on page where Row 1 was checked
+  await executeClick(row1Handle, bridgeUncheck.actions[0], { page: {} });
+  assert.strictEqual(uncheckState.row1Clicks, 1, 'Row 1 checkbox must be clicked to uncheck');
+  assert.strictEqual(uncheckState.row1Checked, false, 'Row 1 checkbox must now be false (UNCHECKED)');
+
+  // Step C: Execute check Row 2
+  const checkRow2Action = {
+    type: 'CLICK',
+    name: 'Row 2 Checkbox',
+    isCheckbox: true,
+    desiredState: true,
+    checked: true,
+    target: { candidates: [{ strategy: 'css-path', value: '#row2' }] }
+  };
+  await executeClick(row2Handle, checkRow2Action, { page: {} });
+  assert.strictEqual(uncheckState.row2Clicks, 1, 'Row 2 checkbox must be clicked to check');
+  assert.strictEqual(uncheckState.row2Checked, true, 'Row 2 checkbox must now be true (CHECKED)');
+
+  // Final check: Row 1 is UNCHECKED, Row 2 is CHECKED!
+  assert.strictEqual(uncheckState.row1Checked, false, 'Row 1 must be unchecked');
+  assert.strictEqual(uncheckState.row2Checked, true, 'Row 2 must be checked');
+  console.log('  ✅ Uncheck Row 1 + Check Row 2 resulted in ONLY Row 2 checked!');
+
+  console.log('\n🎉 ALL MULTI-CHECKBOX DEFAULT ON & UNCHECK TESTS PASSED PERFECTLY!\n');
 })();

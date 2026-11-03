@@ -159,11 +159,15 @@ class ActionDispatcher {
       if (!item) return null;
 
       const visible = (el) => {
-        if (!el || !(el instanceof Element)) return false;
-        const style = getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' &&
-          rect.width > 0 && rect.height > 0;
+        if (!el) return false;
+        if (typeof Element !== 'undefined' && !(el instanceof Element)) return false;
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+        if (typeof el.getBoundingClientRect === 'function') {
+          const rect = el.getBoundingClientRect();
+          if (rect && (rect.width <= 0 || rect.height <= 0)) return false;
+        }
+        return true;
       };
 
       const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -242,11 +246,40 @@ class ActionDispatcher {
       pool.sort((a, b) => score(b) - score(a));
       if (pool[0]) return pool[0];
 
-      // Fallback: If no candidate matched, find the primary clickable link/button or return item
-      const fallbackClickable = item.querySelector('a[href], button, [role="button"]');
-      if (fallbackClickable && visible(fallbackClickable)) return fallbackClickable;
+      // Check if target is a checkbox/switch control
+      const isCbTarget = Boolean(
+        tgt?.isCheckbox ||
+        fingerprint.isCheckbox ||
+        fingerprint.type === 'checkbox' ||
+        fingerprint.role === 'checkbox' ||
+        fingerprint.tagName === 'mat-pseudo-checkbox' ||
+        (typeof tgt?.name === 'string' && /checkbox/i.test(tgt.name)) ||
+        (typeof tgt?.elementName === 'string' && /checkbox/i.test(tgt.elementName))
+      );
+      if (isCbTarget) {
+        const cbPool = Array.from(item.querySelectorAll('input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"], .mat-pseudo-checkbox, .dx-checkbox, mat-checkbox')).filter(visible);
+        if (cbPool.length > 0) {
+          cbPool.sort((a, b) => score(b) - score(a));
+          return cbPool[0];
+        }
+        return null; // Never click an unrelated button or link when targeting a checkbox!
+      }
 
-      return visible(item) ? item : null;
+      // If target was an interactive button or link control
+      const isClickable = Boolean(
+        ['a', 'button'].includes(tag) ||
+        fingerprint.role === 'button' ||
+        fingerprint.role === 'link'
+      );
+      if (isClickable) {
+        const fallbackClickable = Array.from(item.querySelectorAll('a[href], button, [role="button"]')).filter(visible);
+        if (fallbackClickable.length > 0) {
+          fallbackClickable.sort((a, b) => score(b) - score(a));
+          return fallbackClickable[0];
+        }
+      }
+
+      return (tag === '*' || tag === item.tagName.toLowerCase()) && visible(item) && score(item) >= 0 ? item : null;
     }, target);
   }
 

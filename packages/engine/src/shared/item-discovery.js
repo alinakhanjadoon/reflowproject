@@ -188,15 +188,15 @@ class ItemDiscovery {
         };
       }
 
-      const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/i;
+      const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾▲▴+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B2\u25B4\u25B8\u25BE\u276F\u203A\s]+$/i;
       const DOCUMENT_ID_REGEX = /\b((?:SI|INV|DR|TX|CM|PO|SO|BILL|REC|ORD)-\d+(?:[-_]\w+)*|\b\d{4,10}\b)/i;
 
       const cleanCellText = (val) => {
         if (val == null) return '';
         let s = String(val).trim().replace(/\s+/g, ' ');
         if (EXPANDER_GLYPH_REGEX.test(s)) return '';
-        s = s.replace(/^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+/, '').trim();
-        s = s.replace(/[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/, '').trim();
+        s = s.replace(/^[▸►▶▼▽▾▲▴+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B2\u25B4\u25B8\u25BE\u276F\u203A\s]+/, '').trim();
+        s = s.replace(/[▸►▶▼▽▾▲▴+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B2\u25B4\u25B8\u25BE\u276F\u203A\s]+$/, '').trim();
         return s;
       };
 
@@ -478,7 +478,7 @@ class ItemDiscovery {
 
             if (isTableRow) {
               // Direct cell querying without double-matching child divs
-              let cells = Array.from(item.querySelectorAll('td, [role="gridcell"]'));
+              let cells = Array.from(item.querySelectorAll('td, th, [role="gridcell"], [role="rowheader"]'));
               if (cells.length === 0) {
                 cells = Array.from(item.children).filter(c => c.matches?.('td, th, .x-grid-cell, .cell') || c.tagName === 'TD' || c.tagName === 'TH');
               }
@@ -704,10 +704,23 @@ class ItemDiscovery {
         };
       }
 
-      const availableCols = new Set(best.headerColumns || []);
+      const isIgnoredField = (k) => {
+        if (!k || typeof k !== 'string') return true;
+        const norm = k.trim().toLowerCase();
+        if (norm.startsWith('_')) return true;
+        if (['fulltext', 'label', 'text', 'isselectall', 'select', 'selection', 'actions', 'action', 'controls', 'operations', 'manage'].includes(norm)) {
+          return true;
+        }
+        return false;
+      };
+
+      const availableCols = new Set();
+      for (const h of (best.headerColumns || [])) {
+        if (!isIgnoredField(h)) availableCols.add(h);
+      }
       for (const itm of best.items || []) {
         for (const k of Object.keys(itm.fields || {})) {
-          if (k && !['fullText', 'label', 'isSelectAll'].includes(k)) availableCols.add(k);
+          if (!isIgnoredField(k)) availableCols.add(k);
         }
       }
 

@@ -23,7 +23,8 @@ const {
   validateFilterWithExtendedOps,
   evaluateItemFilter: sharedEvaluateItemFilter,
   evaluateFilterPreview,
-  extractAvailableFields
+  extractAvailableFields,
+  resolveItemFilter
 } = require('../shared/item-filter');
 const { ConditionEvaluator } = require('../shared/condition-evaluator');
 const { PageInspector } = require('../shared/page-inspector');
@@ -36,6 +37,7 @@ const LoopStateCoordinator = require('./loop/loop-state-coordinator');
 
 class LoopReplayRunner {
   constructor(options = {}) {
+    this.options = options;
     this.cdpPort = options.cdpPort || 9222;
     this.runId = options.runId || `run_${Date.now()}`;
     this.workflowId = options.workflowId || null;
@@ -56,13 +58,13 @@ class LoopReplayRunner {
     this.resumeFromCheckpoint = options.resumeFromCheckpoint === true;
     this.isAborted = false;
 
+    this.workflow = options.workflow || null;
+
     // Filter and limit configuration
-    const rawFilter = options.itemFilter !== undefined
-      ? options.itemFilter
-      : (options.rowFilter || (options.filterValue ? { column: options.filterColumn || 'Type', value: options.filterValue } : null));
-    const filterValidation = validateFilterWithExtendedOps(rawFilter);
-    this.itemFilter = filterValidation.valid ? filterValidation.filter : (options.itemFilter || null);
-    this.filterValidationError = filterValidation.valid ? null : filterValidation.error;
+    const resolvedFilter = resolveItemFilter(options, this.workflow);
+    this.itemFilter = resolvedFilter || null;
+    this.rowFilter = options.rowFilter || this.itemFilter || null;
+    this.filterValidationError = null;
 
     let validatedLimit = null;
     let limitError = null;
@@ -77,9 +79,6 @@ class LoopReplayRunner {
     }
     this.loopLimit = validatedLimit;
     this.loopLimitError = limitError;
-    this.rowFilter = options.rowFilter || this.itemFilter || options.itemFilter || null;
-    this.itemFilter = this.itemFilter || this.rowFilter || null;
-    this.workflow = options.workflow || null;
 
     // Unified Loop Configuration
     this.loopConfig = LoopDetector.deriveLoopConfig(
@@ -852,10 +851,9 @@ class LoopReplayRunner {
         this._applyTargetUrlDomain(targetUrl);
       }
     }
-    if (!this.itemFilter && (workflow?.itemFilter || workflow?.filter_rules?.itemFilter || workflow?.workflow_definition?.itemFilter)) {
-      const rawFilter = workflow.itemFilter || workflow?.filter_rules?.itemFilter || workflow?.workflow_definition?.itemFilter;
-      const filterValidation = validateFilterWithExtendedOps(rawFilter);
-      this.itemFilter = filterValidation.valid ? filterValidation.filter : null;
+    const resolvedStartFilter = resolveItemFilter(workflow, this.options, this.workflow);
+    if (resolvedStartFilter) {
+      this.itemFilter = resolvedStartFilter;
       this.rowFilter = this.itemFilter;
     }
     if (!this.loopLimit && (workflow?.loopLimit || workflow?.workflow_definition?.loopLimit)) {
@@ -1039,7 +1037,7 @@ class LoopReplayRunner {
 
       // Execute Setup Steps (e.g. Login & Navigate) once
       if (partition.setupSteps.length > 0) {
-        logger.info(`[Loop Runner] Executing ${partition.setupSteps.length} setup step(s)...`);
+        logger.info(`[SETUP] Executing ${partition.setupSteps.length} setup step(s) once...`);
         const setupLoginSeq = detectLoginSequence(partition.setupSteps);
         const isSessionAuth = setupLoginSeq.hasLoginSequence
           ? await isSessionAuthenticated(page, setupLoginSeq)
@@ -1048,7 +1046,7 @@ class LoopReplayRunner {
         for (let i = 0; i < partition.setupSteps.length; i++) {
           const step = partition.setupSteps[i];
           if (isSessionAuth && i <= setupLoginSeq.endIndex) {
-            logger.info(`[Loop Runner] Skipping setup login step #${i + 1} (${step.name || step.elementName || 'Login step'}) - session already authenticated.`);
+            logger.info(`[SETUP] Skipping setup login step #${i + 1} (${step.name || step.elementName || 'Login step'}) - session already authenticated.`);
             continue;
           }
 
@@ -1056,7 +1054,7 @@ class LoopReplayRunner {
           if (i > 0 && step.timeDeltaMs && step.timeDeltaMs > 0) {
             const paceDelay = Math.min(step.timeDeltaMs, 15000);
             if (paceDelay > 600) {
-              logger.info(`[Loop Runner] Pacing setup step #${i + 1}: waiting ${paceDelay}ms for page/state to settle...`);
+              logger.info(`[SETUP] Pacing setup step #${i + 1}: waiting ${paceDelay}ms for page/state to settle...`);
               const end = Date.now() + paceDelay;
               while (Date.now() < end) {
                 if (this.isAborted) break;
@@ -1065,6 +1063,7 @@ class LoopReplayRunner {
             }
           }
 
+          logger.info(`[SETUP] Step #${i + 1}/${partition.setupSteps.length}: ${step.name || step.elementName || step.type || 'Action'}`);
           await this.replayEngine.executeAction(step, i);
         }
 
@@ -1093,6 +1092,14 @@ class LoopReplayRunner {
         this._persistManifest(manifest);
         return { success: false, status: 'FAILED', error: errorMsg, manifest };
       }
+
+      // Capture authoritative collection URL after setup steps and discovery succeed.
+      // This URL (with all filters, query params, hash) is preserved across iterations.
+      let collectionUrl = page.url();
+      this.collectionUrl = collectionUrl;
+      currentPageUrl = collectionUrl;
+      logger.info(`[LOOP] Anchor step #${anchorStepIndex + 1} (${targetStep.name || targetStep.type || 'Action'})`);
+      logger.info(`[LOOP] Collection discovered: ${discovery.itemCount} records (Type: ${discovery.collection?.collectionType || discovery.patternType || 'table-row'}, URL: ${collectionUrl})`);
 
       // Valid collection found, but contains 0 items
       if (discovery.itemCount === 0 || !Array.isArray(discovery.items) || discovery.items.length === 0) {
@@ -1270,7 +1277,7 @@ class LoopReplayRunner {
             continue;
           }
 
-          logger.info(`\n[Loop Runner] --- Processing item [${m + 1}/${matchingItems.length}] (DOM index ${i + 1}: "${itemIdentifier.itemLabel}") ---`);
+          logger.info(`\n[ITEM ${m + 1}/${matchingItems.length}] Processing item ${itemIdentifier.itemLabel ? `"${itemIdentifier.itemLabel}"` : `#${i + 1}`} (DOM index ${i + 1}) ---`);
 
           // 1b. Stop when the requested loop limit / maxItems is reached
           const effectiveLimit = this.loopLimit || this.maxItems;
@@ -1386,6 +1393,7 @@ class LoopReplayRunner {
             triggerStep,
             partition,
             currentPageUrl,
+            collectionUrl: this.collectionUrl || currentPageUrl,
             initialPageUrls,
             currentPage,
             manifest,
@@ -1400,9 +1408,17 @@ class LoopReplayRunner {
           if (attemptOutcome && attemptOutcome.stopped) {
             break;
           }
+          if (attemptOutcome && attemptOutcome.itemResult && attemptOutcome.itemResult.collectionRestorationFailed) {
+            const reason = attemptOutcome.itemResult.collectionRestorationReason || 'Collection context could not be restored safely';
+            logger.error(`[LOOP] Halting loop because collection context could not be restored safely: ${reason}`);
+            this._collectionRestorationFailed = true;
+            this._collectionRestorationError = `Collection restoration failed: ${reason}`;
+            manifest.error = this._collectionRestorationError;
+            break;
+          }
         }
 
-        if (!paginationEnabled || currentPage >= maxPages || this._limitReached) {
+        if (!paginationEnabled || currentPage >= maxPages || this._limitReached || this._collectionRestorationFailed) {
           break;
         }
         const beforePageFingerprint = await this.getCollectionFingerprint(page, discovery.collection);
@@ -1436,6 +1452,7 @@ class LoopReplayRunner {
         manifest.pagesProcessed = currentPage + 1;
         currentPage++;
         currentPageUrl = page.url();
+        this.collectionUrl = currentPageUrl;
         this.writeLoopCheckpoint(manifest, null, null, currentPage, null, null);
         logger.info('[Loop Runner] Advanced to page #' + currentPage + ' with ' + discovery.itemCount + ' item(s).');
         onProgress({ status: 'PAGE_COMPLETE', page: currentPage, manifest, discovery });
@@ -1459,16 +1476,24 @@ class LoopReplayRunner {
       }
 
       // 6. Execute teardown steps after normal loop completion once
-      if (!this.isAborted && Array.isArray(partition.teardownSteps) && partition.teardownSteps.length > 0) {
-        logger.info(`[Loop Runner] Executing ${partition.teardownSteps.length} teardown step(s)...`);
+      if (!this.isAborted && !this._collectionRestorationFailed && Array.isArray(partition.teardownSteps) && partition.teardownSteps.length > 0) {
+        logger.info(`[TEARDOWN] Executing ${partition.teardownSteps.length} teardown step(s) once...`);
         for (let t = 0; t < partition.teardownSteps.length; t++) {
           const step = partition.teardownSteps[t];
           const stepIndex = (endStepIndex + 1) + t;
+          logger.info(`[TEARDOWN] Step #${t + 1}/${partition.teardownSteps.length}: ${step.name || step.elementName || step.type || 'Action'}`);
           await this.replayEngine.executeAction(step, stepIndex);
         }
       }
 
-      manifest.status = this.isAborted ? 'STOPPED' : (manifest.itemsFailed > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED');
+      manifest.status = this.isAborted
+        ? 'STOPPED'
+        : (this._collectionRestorationFailed
+          ? 'FAILED'
+          : (manifest.itemsFailed > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED'));
+      if (this._collectionRestorationFailed && !manifest.error) {
+        manifest.error = this._collectionRestorationError || 'Collection restoration failed';
+      }
       manifest.endTime = new Date().toISOString();
       if (!this.isAborted) {
         this.writeLoopCheckpoint(manifest, null, null, currentPage, null, null);

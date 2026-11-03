@@ -621,6 +621,20 @@ const EXTENDED_OPS = new Set([
  * @returns {{ valid: boolean, error: string|null, filter: any }}
  */
 function validateFilterWithExtendedOps(rawFilter) {
+  if (rawFilter && typeof rawFilter === 'object') {
+    if ((rawFilter.field || rawFilter.column) && !rawFilter.operator && (rawFilter.value !== undefined || rawFilter.text !== undefined)) {
+      rawFilter = Object.assign({}, rawFilter, { operator: 'equals' });
+    }
+    if (Array.isArray(rawFilter.conditions)) {
+      const hasMissingOp = rawFilter.conditions.some(c => c && (c.field || c.column) && !c.operator);
+      if (hasMissingOp) {
+        rawFilter = Object.assign({}, rawFilter, {
+          conditions: rawFilter.conditions.map(c => (c && (c.field || c.column) && !c.operator) ? Object.assign({}, c, { operator: 'equals' }) : c)
+        });
+      }
+    }
+  }
+
   const filterValidation = validateItemFilter(rawFilter);
   if (filterValidation.valid) {
     return filterValidation;
@@ -640,6 +654,115 @@ function validateFilterWithExtendedOps(rawFilter) {
   }
 
   return filterValidation;
+}
+
+/**
+ * Normalizes filter candidate shapes from workflows, runs, or preflight options.
+ */
+function normalizeFilterCandidate(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.itemFilter && typeof raw.itemFilter === 'object') return normalizeFilterCandidate(raw.itemFilter);
+  if (raw.item_filter && typeof raw.item_filter === 'object') return normalizeFilterCandidate(raw.item_filter);
+  if (raw.filter && typeof raw.filter === 'object' && (raw.filter.field || raw.filter.conditions || raw.filter.column)) {
+    return normalizeFilterCandidate(raw.filter);
+  }
+
+  let clone;
+  try {
+    clone = JSON.parse(JSON.stringify(raw));
+  } catch {
+    clone = Object.assign({}, raw);
+  }
+
+  if (Array.isArray(clone.conditions) && clone.conditions.length > 0) {
+    clone.conditions = clone.conditions.map(c => {
+      const field = c.field || c.column || c.header || '';
+      const operator = c.operator || 'equals';
+      return {
+        ...c,
+        field,
+        operator,
+        value: c.value !== undefined ? c.value : ''
+      };
+    });
+    return clone;
+  }
+
+  if (clone.field || clone.column || clone.header) {
+    const field = clone.field || clone.column || clone.header;
+    const operator = clone.operator || 'equals';
+    return {
+      matchMode: clone.matchMode || 'all',
+      conditions: [{ field, operator, value: clone.value !== undefined ? clone.value : (clone.text || '') }],
+      field,
+      operator,
+      value: clone.value !== undefined ? clone.value : (clone.text || '')
+    };
+  }
+
+  if (clone.value !== undefined || clone.text !== undefined) {
+    const field = clone.column || clone.field || 'Type';
+    const operator = clone.operator || 'contains';
+    const val = clone.value !== undefined ? clone.value : clone.text;
+    return {
+      matchMode: clone.matchMode || 'all',
+      conditions: [{ field, operator, value: val }],
+      field,
+      operator,
+      value: val
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Resolves and validates an item filter from candidate sources (run, workflow, options).
+ */
+function resolveItemFilter(...sources) {
+  for (const src of sources) {
+    if (!src || typeof src !== 'object') continue;
+
+    const candidates = [
+      src.itemFilter,
+      src.item_filter,
+      src.rowFilter,
+      src.row_filter,
+      src.filter,
+      src.loop?.filter,
+      src.loop?.itemFilter,
+      src.loop?.item_filter,
+      src.loop?.conditions ? { conditions: src.loop.conditions, matchMode: src.loop.matchMode || 'all' } : null,
+      src.filter_rules?.itemFilter,
+      src.filter_rules?.item_filter,
+      src.filter_rules?.filter,
+      src.filter_rules?.conditions ? { conditions: src.filter_rules.conditions, matchMode: src.filter_rules.matchMode || 'all' } : null,
+      src.filter_rules,
+      src.conditions ? { conditions: src.conditions, matchMode: src.matchMode || 'all' } : null,
+      src.workflow_definition?.itemFilter,
+      src.workflow_definition?.item_filter,
+      src.workflow_definition?.rowFilter,
+      src.workflow_definition?.filter,
+      src.workflow_definition?.loop?.filter,
+      src.workflow_definition?.loop?.itemFilter,
+      src.workflow_definition?.filter_rules?.itemFilter,
+      src.workflow_definition?.filter_rules?.conditions ? { conditions: src.workflow_definition.filter_rules.conditions, matchMode: src.workflow_definition.filter_rules.matchMode || 'all' } : null,
+      src.workflow_definition?.filter_rules,
+      src.filterValue ? { column: src.filterColumn || 'Type', value: src.filterValue, operator: 'contains' } : null
+    ];
+
+    for (const cand of candidates) {
+      if (!cand || typeof cand !== 'object') continue;
+      const normalized = normalizeFilterCandidate(cand);
+      if (normalized) {
+        const validation = validateFilterWithExtendedOps(normalized);
+        if (validation.valid) {
+          return validation.filter;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -1162,6 +1285,8 @@ module.exports = {
   resolveFieldValue,
   validateStrictIsoDate,
   parseSourceDate,
+  normalizeFilterCandidate,
+  resolveItemFilter,
   ItemFilter: {
     SUPPORTED_OPERATORS,
     SUPPORTED_MATCH_MODES,
@@ -1170,6 +1295,8 @@ module.exports = {
     validateWithExtendedOps: validateFilterWithExtendedOps,
     evaluate: evaluateItemFilter,
     evaluatePreview: evaluateFilterPreview,
-    extractFields: extractAvailableFields
+    extractFields: extractAvailableFields,
+    resolveItemFilter,
+    normalizeFilterCandidate
   }
 };

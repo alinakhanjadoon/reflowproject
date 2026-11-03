@@ -100,7 +100,7 @@ class ArtifactDownloadManager {
   processAndStoreDownload(sourcePath, itemKey = null, itemLabel = null, itemFields = {}) {
     if (!sourcePath || !fs.existsSync(sourcePath)) return null;
     const filename = path.basename(sourcePath);
-    if (filename.endsWith('.crdownload') || filename.endsWith('.tmp')) return null;
+    if (filename.endsWith('.crdownload') || filename.endsWith('.tmp') || filename.endsWith('.download') || filename.endsWith('.part')) return null;
 
     // Fallback to active item context if itemKey or fields are missing
     if (!itemKey && this._activeItemContext) {
@@ -179,6 +179,7 @@ class ArtifactDownloadManager {
       if (this.downloadManager) {
         this.downloadManager.recordSuccess(itemKey || targetFilename, {
           filename: targetFilename,
+        targetFilename,
           size: fileSizeBytes,
           filePath: destPath,
           runPath: relativeRunPath,
@@ -197,6 +198,7 @@ class ArtifactDownloadManager {
         itemKey: itemKey || filename,
         itemLabel: itemLabel || filename,
         filename: targetFilename,
+        targetFilename,
         fileHash,
         filePath: relativeFilePath,
         relativeFilePath: relativeFilePath,
@@ -232,6 +234,7 @@ class ArtifactDownloadManager {
       return {
         id: (savedRecord || downloadRecord).id || `dl_${Date.now()}`,
         filename: targetFilename,
+        targetFilename,
         path: destPath,
         relativePath: relativeFilePath,
         runPath: relativeRunPath,
