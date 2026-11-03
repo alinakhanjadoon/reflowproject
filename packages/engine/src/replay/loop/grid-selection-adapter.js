@@ -98,33 +98,25 @@ class GridSelectionAdapter {
           } catch (e) {}
         }
 
-        // 2. DOM-based deselect: find all selected rows
+        // 2. DOM-based deselect: cleanly remove selection classes and attributes
+        // NEVER synthesize blind DOM .click() events which trigger cascading application events!
         const selectedRows = Array.from(document.querySelectorAll(
           '.x-grid-item-selected, .x-grid-row-selected, tr.selected, [aria-selected="true"]'
         ));
 
         for (const row of selectedRows) {
-          const checker = row.querySelector('input[type="checkbox"]:checked, [role="checkbox"][aria-checked="true"]');
-          if (checker) {
-            checker.click();
-          } else {
-            row.classList.remove('x-grid-item-selected', 'x-grid-row-selected');
-            row.removeAttribute('aria-selected');
+          row.classList.remove('x-grid-item-selected', 'x-grid-row-selected', 'selected');
+          row.removeAttribute('aria-selected');
+          const innerCheckboxes = row.querySelectorAll('input[type="checkbox"]:checked');
+          for (const cb of innerCheckboxes) {
+            cb.checked = false;
           }
         }
 
-        // 3. Uncheck any checked checkboxes in the grid body
-        const checkedBoxes = Array.from(document.querySelectorAll(
-          '.x-grid-body input[type="checkbox"]:checked, [role="grid"] input[type="checkbox"]:checked, table tbody input[type="checkbox"]:checked'
-        ));
-        for (const cb of checkedBoxes) {
-          cb.click();
-        }
-
-        // 4. Header select-all checker deselect if checked
-        const headerChecker = document.querySelector('.x-grid-hd-checker-on, .x-column-header-checkbox.x-grid-hd-checker-on');
-        if (headerChecker) {
-          headerChecker.click();
+        // 3. Header select-all checker deselect without blind click
+        const headerCheckers = document.querySelectorAll('.x-grid-hd-checker-on, .x-column-header-checkbox.x-grid-hd-checker-on');
+        for (const hc of headerCheckers) {
+          hc.classList.remove('x-grid-hd-checker-on');
         }
       });
       await new Promise(r => setTimeout(r, 100));
@@ -197,17 +189,14 @@ class GridSelectionAdapter {
           }
         }
 
-        // Deselect any other row
+        // Deselect any other row cleanly without synthetic clicks
         rows.forEach((r, idx) => {
           if (idx !== targetIdx) {
-            const isSelected = r.classList.contains('x-grid-item-selected') ||
-              r.classList.contains('x-grid-row-selected') ||
-              r.getAttribute('aria-selected') === 'true';
-            if (isSelected) {
-              const checker = r.querySelector('input[type="checkbox"]:checked, [role="checkbox"][aria-checked="true"]');
-              if (checker) checker.click();
-              r.classList.remove('x-grid-item-selected', 'x-grid-row-selected');
-              r.removeAttribute('aria-selected');
+            r.classList.remove('x-grid-item-selected', 'x-grid-row-selected', 'selected');
+            r.removeAttribute('aria-selected');
+            const innerCbs = r.querySelectorAll('input[type="checkbox"]:checked');
+            for (const cb of innerCbs) {
+              cb.checked = false;
             }
           }
         });

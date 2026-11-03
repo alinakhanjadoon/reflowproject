@@ -1045,8 +1045,23 @@ class ItemExecutionHandler {
             logger.info(`[Loop Runner] Item #${i + 1}/${discovery.itemCount}: Checked "${selectResult.targetText}", previous selections cleared.`);
           } else if (action.scope === 'item') {
             // Table/grid row action:
-            // On first item action (actionOffset === 0), clear previously selected rows first
-            if (actionOffset === 0) {
+            // Check if the current action or loop steps already contain an explicit row selection / checkbox interaction
+            const hasExplicitRowSelection = Boolean(
+              action.isCheckbox ||
+              action.desiredState !== undefined ||
+              action.checked !== undefined ||
+              action.target?.fingerprint?.type === 'checkbox' ||
+              action.fingerprint?.type === 'checkbox' ||
+              action.target?.isCheckbox ||
+              (typeof action.name === 'string' && action.name.toLowerCase().includes('checkbox')) ||
+              (typeof action.elementName === 'string' && action.elementName.toLowerCase().includes('checkbox')) ||
+              (typeof action.target?.selector === 'string' && /\b(x-grid-row-checker|checker|checkbox)\b/i.test(action.target.selector)) ||
+              (typeof action.target?.fingerprint?.className === 'string' && /\b(x-grid-row-checker|checker|checkbox)\b/i.test(action.target.fingerprint.className)) ||
+              action.target?.candidates?.some(c => typeof c?.value === 'string' && /\b(x-grid-row-checker|checker|checkbox)\b/i.test(c.value))
+            );
+
+            // On first item action (actionOffset === 0), clear previous selections ONLY when no explicit selection step exists
+            if (actionOffset === 0 && !hasExplicitRowSelection) {
               await clearGridSelections();
             }
 
@@ -1066,16 +1081,8 @@ class ItemExecutionHandler {
                 );
               }
 
-              // If first item action, verify and enforce that only row i is selected (for ERP grids without explicit checkbox steps)
-              const isCheckboxStep = Boolean(
-                action.isCheckbox ||
-                action.desiredState !== undefined ||
-                action.target?.fingerprint?.type === 'checkbox' ||
-                action.fingerprint?.type === 'checkbox' ||
-                (typeof action.target?.selector === 'string' && action.target.selector.includes('checkbox')) ||
-                action.target?.candidates?.some(c => typeof c?.value === 'string' && c.value.includes('checkbox'))
-              );
-              if (actionOffset === 0 && !isCheckboxStep) {
+              // Only enforce single selection when there is NO explicit recorded selection step
+              if (actionOffset === 0 && !hasExplicitRowSelection) {
                 await enforceGridRowSingleSelection(i);
                 logger.info(`[Loop Runner] Item #${i + 1}/${discovery.itemCount}: Selected target row, previous grid selections cleared.`);
               }
@@ -1130,6 +1137,12 @@ class ItemExecutionHandler {
               }
               actionResult.downloadedFiles = itemResult.downloadedFiles.map(file => file.filename || file.targetFilename);
             }
+          }
+
+          if ((action.isDownload === true || action.requireDownload === true) &&
+              (!itemResult.downloadedFiles || itemResult.downloadedFiles.length === 0) &&
+              !alreadyDownloaded?.isDuplicate) {
+            throw new Error(`Download failed: Expected file was not downloaded for item #${i + 1} (${itemIdentifier.itemLabel})`);
           }
 
           itemResult.actions.push(actionResult);

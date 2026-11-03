@@ -226,7 +226,12 @@ async function executeClick(elementHandle, action, options = {}) {
     action.target?.fingerprint?.role === 'checkbox' ||
     action.target?.fingerprint?.tagName === 'mat-pseudo-checkbox' ||
     (action.name && action.name.toLowerCase().includes('checkbox')) ||
-    (action.elementName && action.elementName.toLowerCase().includes('checkbox'))
+    (action.elementName && action.elementName.toLowerCase().includes('checkbox')) ||
+    (action.target?.fingerprint?.className && typeof action.target.fingerprint.className === 'string' &&
+      /\b(x-grid-row-checker|x-form-checkbox|x-grid-hd-checker|checker|checkbox)\b/i.test(action.target.fingerprint.className)) ||
+    (action.target?.selector && typeof action.target.selector === 'string' &&
+      /\b(x-grid-row-checker|x-form-checkbox|x-grid-hd-checker|checker|checkbox)\b/i.test(action.target.selector)) ||
+    action.target?.candidates?.some(c => typeof c?.value === 'string' && /\b(x-grid-row-checker|x-form-checkbox|checker|checkbox)\b/i.test(c.value))
   );
 
   let checkboxStatus = null;
@@ -242,12 +247,17 @@ async function executeClick(elementHandle, action, options = {}) {
       const role = (getAttr(el, 'role') || '').toLowerCase();
       const isRoleCb = role === 'checkbox' || role === 'switch' || hasAttr(el, 'aria-checked') || hasAttr(el, 'aria-pressed');
       const isMatCb = el.tagName === 'MAT-CHECKBOX' || hasClass(el, 'mat-checkbox') || hasClass(el, 'mat-mdc-checkbox') || hasClass(el, 'dx-checkbox');
+      const isExtCb = hasClass(el, 'x-grid-row-checker') ||
+                      hasClass(el, 'x-form-checkbox') ||
+                      hasClass(el, 'x-grid-hd-checker') ||
+                      Boolean(query(el, '.x-grid-row-checker, .x-form-checkbox, .x-grid-hd-checker')) ||
+                      Boolean(closest(el, '.x-grid-row-checker, .x-form-checkbox, .x-grid-hd-checker'));
       const hasInnerCb = Boolean(query(el, 'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]'));
       const isPseudoCb = hasClass(el, 'mat-pseudo-checkbox') || Boolean(query(el, '.mat-pseudo-checkbox'));
       const isInsideOption = Boolean(closest(el, 'mat-option, [role="option"], .mat-mdc-option'));
       const hasDataCheck = hasAttr(el, 'data-state') || hasAttr(el, 'data-checked');
 
-      if (!isInputCb && !isRoleCb && !isMatCb && !hasInnerCb && !isPseudoCb && !isInsideOption && !hasDataCheck && !isTargetCheckbox) {
+      if (!isInputCb && !isRoleCb && !isMatCb && !isExtCb && !hasInnerCb && !isPseudoCb && !isInsideOption && !hasDataCheck && !isTargetCheckbox) {
         return null;
       }
 
@@ -293,7 +303,23 @@ async function executeClick(elementHandle, action, options = {}) {
             hasClass(el, 'dx-checkbox-checked') ||
             hasClass(el, 'ant-checkbox-checked') ||
             hasClass(el, 'checked') ||
-            hasClass(el, 'is-checked')) return true;
+            hasClass(el, 'is-checked') ||
+            hasClass(el, 'x-grid-hd-checker-on') ||
+            hasClass(closest(el, '.x-grid-hd-checker-on'), 'x-grid-hd-checker-on') ||
+            hasClass(el, 'x-form-cb-checked') ||
+            hasClass(closest(el, '.x-form-cb-wrap'), 'x-form-cb-checked') ||
+            hasClass(closest(el, 'tr, table.x-grid-item, .x-grid-row, .x-grid-item'), 'x-grid-item-selected') ||
+            hasClass(closest(el, 'tr, table.x-grid-item, .x-grid-row, .x-grid-item'), 'x-grid-row-selected')) return true;
+
+        if (typeof window !== 'undefined' && window.Ext) {
+          try {
+            const cmp = window.Ext.getCmp && (window.Ext.getCmp(el.id) || (el.closest && el.closest('[id]') && window.Ext.getCmp(el.closest('[id]').id)));
+            if (cmp && typeof cmp.getValue === 'function') {
+              const val = cmp.getValue();
+              if (typeof val === 'boolean') return val;
+            }
+          } catch {}
+        }
 
         if (query(el, '.mat-pseudo-checkbox-checked') || hasClass(el, 'mat-pseudo-checkbox-checked')) return true;
 
@@ -324,7 +350,7 @@ async function executeClick(elementHandle, action, options = {}) {
     desiredState = Boolean(action.meta.checked);
   } else if (action.target?.fingerprint?.checked === true || action.target?.checked === true) {
     desiredState = false;
-  } else if (isTargetCheckbox) {
+  } else if (isTargetCheckbox || isCheckboxControl) {
     // Checkbox click default target state is ON (checked)
     desiredState = true;
   }
@@ -655,7 +681,23 @@ async function executeClick(elementHandle, action, options = {}) {
               hasClass(el, 'dx-checkbox-checked') ||
               hasClass(el, 'ant-checkbox-checked') ||
               hasClass(el, 'checked') ||
-              hasClass(el, 'is-checked')) return true;
+              hasClass(el, 'is-checked') ||
+              hasClass(el, 'x-grid-hd-checker-on') ||
+              hasClass(closest(el, '.x-grid-hd-checker-on'), 'x-grid-hd-checker-on') ||
+              hasClass(el, 'x-form-cb-checked') ||
+              hasClass(closest(el, '.x-form-cb-wrap'), 'x-form-cb-checked') ||
+              hasClass(closest(el, 'tr, table.x-grid-item, .x-grid-row, .x-grid-item'), 'x-grid-item-selected') ||
+              hasClass(closest(el, 'tr, table.x-grid-item, .x-grid-row, .x-grid-item'), 'x-grid-row-selected')) return true;
+
+          if (typeof window !== 'undefined' && window.Ext) {
+            try {
+              const cmp = window.Ext.getCmp && (window.Ext.getCmp(el.id) || (el.closest && el.closest('[id]') && window.Ext.getCmp(el.closest('[id]').id)));
+              if (cmp && typeof cmp.getValue === 'function') {
+                const val = cmp.getValue();
+                if (typeof val === 'boolean') return val;
+              }
+            } catch {}
+          }
 
           if (query(el, '.mat-pseudo-checkbox-checked') || hasClass(el, 'mat-pseudo-checkbox-checked')) return true;
 
@@ -667,7 +709,10 @@ async function executeClick(elementHandle, action, options = {}) {
 
         let nowChecked = getChecked();
         if (nowChecked !== desired) {
-          const recoveryEl = query(el, 'input[type="checkbox"], input[type="radio"]') || closest(el, 'label') || el;
+          const recoveryEl = query(el, 'input[type="checkbox"], input[type="radio"]') ||
+                             query(el, '.x-grid-row-checker, .x-form-checkbox') ||
+                             closest(el, 'label') ||
+                             el;
           recoveryEl.click?.();
           nowChecked = getChecked();
         }
