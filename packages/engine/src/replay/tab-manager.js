@@ -188,9 +188,8 @@ class TabManager {
 
   /**
    * Reconcile active tab before an action executes.
-   * - Safely cleans up any open auxiliary tabs (GUID viewers, blob tabs, document exports).
-   * - Reconciles duplicate portal tabs.
-   * - Restores focus and activation to the primary workflow tab.
+   * - Ensures replayEngine is connected to an open, valid workflow tab.
+   * - Does NOT aggressively close auxiliary tabs during action replay.
    * 
    * @param {object} action
    * @param {object} replayEngine
@@ -198,14 +197,15 @@ class TabManager {
   async reconcileActiveTab(action, replayEngine) {
     if (!replayEngine) return;
 
-    // 1. Clean up any open auxiliary tabs
-    await this.cleanupAuxiliaryTabs();
+    // Only restore primary page if the current page is closed or pointed at dashboard/internal
+    const currentPage = replayEngine.page;
+    const isCurrentValid = currentPage &&
+      (typeof currentPage.isClosed !== 'function' || !currentPage.isClosed()) &&
+      !isDashboardUrl(this.getSafeUrl(currentPage));
 
-    // 2. Reconcile duplicate tabs
-    await this._reconcileDuplicateTabs();
-
-    // 3. Ensure replayEngine is attached to primaryPage and bring it to front
-    await this.ensurePrimaryTabActive(replayEngine);
+    if (!isCurrentValid) {
+      await this.ensurePrimaryTabActive(replayEngine);
+    }
   }
 
   /**
@@ -341,6 +341,9 @@ class TabManager {
       const u2 = new URL(primaryUrl);
       if (u1.origin !== u2.origin) return false;
 
+      // Search parameters must match. A different query string represents a distinct view/document.
+      if (u1.search !== u2.search) return false;
+
       const normPath1 = (u1.pathname + u1.hash).replace(/\/+$/, '');
       const normPath2 = (u2.pathname + u2.hash).replace(/\/+$/, '');
 
@@ -426,12 +429,10 @@ class TabManager {
             return;
           }
 
-          // Auxiliary tab (GUID viewer, blob, document export) -> track and return focus
+          // Auxiliary tab (GUID viewer, blob, document export) -> track safely without forcibly defocusing
           if (this._isAuxiliaryUrl(pUrl)) {
-            logger.info(`[TabManager] Tracked auxiliary workflow tab: "${pUrl}". Bringing primary workflow tab to front.`);
+            logger.info(`[TabManager] Tracked auxiliary workflow tab: "${pUrl}".`);
             this.auxiliaryPages.add(page);
-            // Bring primary page back to front immediately so user/automation isn't stranded
-            await this.ensurePrimaryTabActive();
             return;
           }
         };

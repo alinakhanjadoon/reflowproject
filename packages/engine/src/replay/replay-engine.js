@@ -184,18 +184,37 @@ class ReplayEngine extends EventEmitter {
   }
 
   /**
-   * Wait for any transient SPA/ExtJS loading masks or spinners to disappear
+   * Wait for any transient SPA/ExtJS loading masks, spinners, or aria-busy indicators to disappear
    */
   async _waitForLoadingMasks(timeoutMs = 8000) {
-    if (!this.page) return;
+    if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
     try {
       await this.page.waitForFunction(() => {
-        const masks = Array.from(document.querySelectorAll('.x-mask, .x-mask-loading, .x-mask-msg, .loading-mask, .spinner-overlay, [aria-busy="true"]'));
+        const masks = Array.from(document.querySelectorAll(
+          '.x-mask, .x-mask-loading, .x-mask-msg, .x-grid-empty, .x-masked, .loading-mask, .spinner-overlay, .loading, [aria-busy="true"], .dx-loadpanel'
+        ));
         return !masks.some(m => {
           if (m.offsetParent === null) return false;
           const style = window.getComputedStyle(m);
           return style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0.05;
         });
+      }, { timeout: timeoutMs }).catch(() => {});
+    } catch {}
+  }
+
+  /**
+   * Wait for any active ExtJS AJAX requests to complete to prevent firing next action during background data loads.
+   */
+  async _waitForExtAjaxIdle(timeoutMs = 8000) {
+    if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
+    try {
+      await this.page.waitForFunction(() => {
+        try {
+          if (typeof window.Ext !== 'undefined' && window.Ext.Ajax && typeof window.Ext.Ajax.isLoading === 'function') {
+            return !window.Ext.Ajax.isLoading();
+          }
+        } catch {}
+        return true;
       }, { timeout: timeoutMs }).catch(() => {});
     } catch {}
   }
@@ -648,13 +667,19 @@ class ReplayEngine extends EventEmitter {
       this.currentActionIndex = index;
       if (!this.page) throw new Error('ReplayEngine is not connected to a page.');
 
+      // Proactively close duplicate background modal windows / dialogs if present
+      if (typeof this.interruptionHandler?.closeDuplicateWindows === 'function' && this.page) {
+        await this.interruptionHandler.closeDuplicateWindows(this.page).catch(() => {});
+      }
+
       // 1. Explicit step delay if requested
       if (this.stepDelayMs > 0) {
         await new Promise(r => setTimeout(r, this.stepDelayMs));
       }
 
-      // 2. Wait for any active ExtJS/SPA loading masks or spinners to clear
-      await this._waitForLoadingMasks(6000);
+      // 2. Wait for any active ExtJS/SPA loading masks or in-flight AJAX requests to clear
+      await this._waitForLoadingMasks(8000);
+      await this._waitForExtAjaxIdle(8000);
 
       if (this.isAborted) {
         throw new Error('Execution stopped by user');
@@ -755,14 +780,12 @@ class ReplayEngine extends EventEmitter {
         await new Promise(r => setTimeout(r, 300));
       }
 
-      // Reconcile and return focus to the primary portal workflow
-      if (this.tabManager) {
-        if (action.type === 'CLICK') {
-          await new Promise(r => setTimeout(r, 200));
-        }
-        await this.tabManager.cleanupAuxiliaryTabs();
-        await this.tabManager.ensurePrimaryTabActive(this);
-      }
+      // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
+      await new Promise(r => setTimeout(r, 250));
+
+      // Wait for any newly triggered loading masks or AJAX requests to clear before proceeding
+      await this._waitForLoadingMasks(8000);
+      await this._waitForExtAjaxIdle(8000);
 
       const scorePercent = Math.round(confidenceScore * 100);
       logger.action(index + 1, action.type, candidate.value, `score=${scorePercent}%`);
@@ -824,14 +847,10 @@ class ReplayEngine extends EventEmitter {
           await this._setAutomatedAction(false, elementHandle);
         }
 
-        // Reconcile and return focus to the primary portal workflow
-        if (this.tabManager) {
-          if (action.type === 'CLICK') {
-            await new Promise(r => setTimeout(r, 200));
-          }
-          await this.tabManager.cleanupAuxiliaryTabs();
-          await this.tabManager.ensurePrimaryTabActive(this);
-        }
+        // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
+        await new Promise(r => setTimeout(r, 200));
+        await this._waitForLoadingMasks(8000);
+        await this._waitForExtAjaxIdle(8000);
 
         return { success: true, scoped: true };
       } finally {
@@ -1284,6 +1303,13 @@ class ReplayEngine extends EventEmitter {
           continue;
         }
 
+        // Proactively close duplicate background modal windows / dialogs if present
+        if (typeof this.interruptionHandler?.closeDuplicateWindows === 'function' && this.page) {
+          await this.interruptionHandler.closeDuplicateWindows(this.page).catch(() => {});
+        }
+        await this._waitForLoadingMasks(8000);
+        await this._waitForExtAjaxIdle(8000);
+
         // 1. Condition-based wait & resolve element
         const { elementHandle, candidate, confidenceScore } = await this.waitForTargetElement(
           action.target,
@@ -1320,6 +1346,11 @@ class ReplayEngine extends EventEmitter {
         const scorePercent = Math.round(confidenceScore * 100);
         const detail = `matched via [${candidate.strategy}] score=${scorePercent}%`;
         logger.action(action.index + 1, action.type, candidate.value, detail);
+
+        // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
+        await new Promise(r => setTimeout(r, 200));
+        await this._waitForLoadingMasks(8000);
+        await this._waitForExtAjaxIdle(8000);
 
         // Calculate humanized post-action timing delay
         const postDelay = ActionDispatcher.calculatePostActionDelay(this.botConfig);

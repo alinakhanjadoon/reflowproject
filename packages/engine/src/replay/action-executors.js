@@ -11,6 +11,42 @@ const { moveMouseHumanlike, calculateDelay, calculateTypingDelay } = require('./
 const logger = require('../utils/logger');
 
 /**
+ * Wait for element bounding box coordinates and dimensions to stabilize
+ * across consecutive frames to prevent mis-clicks while menus, accordions,
+ * or modal overlays are animating or sliding into place.
+ */
+async function waitForElementPositionStable(elementHandle, maxWaitMs = 800) {
+  if (!elementHandle || typeof elementHandle.boundingBox !== 'function') return;
+  const startTime = Date.now();
+  let prevBox = null;
+  let stableCount = 0;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const box = await elementHandle.boundingBox().catch(() => null);
+    if (!box) break;
+
+    if (prevBox) {
+      const dx = Math.abs(box.x - prevBox.x);
+      const dy = Math.abs(box.y - prevBox.y);
+      const dw = Math.abs(box.width - prevBox.width);
+      const dh = Math.abs(box.height - prevBox.height);
+
+      if (dx <= 1 && dy <= 1 && dw <= 1 && dh <= 1) {
+        stableCount++;
+        if (stableCount >= 2) {
+          return;
+        }
+      } else {
+        stableCount = 0;
+      }
+    }
+
+    prevBox = box;
+    await new Promise(r => setTimeout(r, 40));
+  }
+}
+
+/**
  * Ensure element is scrolled into view and interactable
  */
 async function ensureInteractable(elementHandle, action) {
@@ -77,8 +113,9 @@ async function ensureInteractable(elementHandle, action) {
   }
 
   // Pre-action stabilization settle delay:
-  // Allow browser layout shifts, smooth scrolling, and framework hydration to settle
-  await new Promise(r => setTimeout(r, status.didScroll ? 250 : 30));
+  // Allow browser layout shifts, smooth scrolling, CSS transitions, and framework hydration to settle
+  await waitForElementPositionStable(elementHandle, status.didScroll ? 800 : 400);
+  await new Promise(r => setTimeout(r, status.didScroll ? 150 : 30));
 
   if (status.isDisabled) {
     logger.warn(`Element for Action #${action.index + 1} has disabled attribute; attempting synthetic click dispatch.`);
@@ -273,6 +310,8 @@ async function executeClick(elementHandle, action, options = {}) {
       };
     });
   } catch {}
+
+  const isCheckboxControl = Boolean(checkboxStatus && checkboxStatus.isCheckbox);
 
   let desiredState = undefined;
   if (action.isUncheck === true || action.action === 'UNCHECK') {
@@ -511,14 +550,14 @@ async function executeClick(elementHandle, action, options = {}) {
   }
 
   // Supplementary / Hybrid DOM Event Dispatch:
-  // If coordinate click was obscured (e.g. by transparent ripple or container),
-  // dispatch full synthetic DOM sequence directly on the element so framework event listeners receive the event reliably.
+  // If native CDP click was not successful, dispatch full synthetic DOM sequence
+  // directly on the element so framework event listeners receive the event reliably.
   // CRITICAL: Do NOT execute secondary clicks if element was ALREADY clicked directly by native CDP!
-  // Redundant secondary clicks cause legacy portals to register duplicate clicks and open multiple identical windows.
-  const isCheckboxControl = Boolean(checkboxStatus && checkboxStatus.isCheckbox);
-  if (!clicked || (!isCheckboxControl && !isLikelyDownloadOrExport && !hitMeta.isDirectHit)) {
+  // Redundant secondary clicks cause legacy portals (e.g. ExtJS, ASP.NET) to register duplicate clicks
+  // and open multiple identical windows (e.g. Search Invoices).
+  if (!clicked) {
     try {
-      await clickTarget.evaluate((el, alreadyClicked) => {
+      await clickTarget.evaluate((el) => {
         try { el.focus?.(); } catch {}
 
         const PtrEvt = typeof PointerEvent !== 'undefined' ? PointerEvent : null;
@@ -539,24 +578,15 @@ async function executeClick(elementHandle, action, options = {}) {
           try { el.dispatchEvent(new MouseEvt('click', { bubbles: true, cancelable: true, view: win })); } catch {}
         }
 
-        if (!alreadyClicked || !el.matches?.(':active')) {
-          try { el.click?.(); } catch {}
-        }
-
-        const parentBtn = el.closest && el.closest('button, a, [role="button"], .x-btn, .dxm-item');
-        if (parentBtn && parentBtn !== el) {
-          try { parentBtn.focus?.(); } catch {}
-          try { parentBtn.click?.(); } catch {}
-        }
-      }, clicked && hitMeta.isDirectHit);
+        try { el.click?.(); } catch {}
+      });
+      clicked = true;
     } catch (fallbackErr) {
-      if (!clicked) {
-        throw new ActionExecutionError(`Failed to click element: ${fallbackErr.message}`, {
-          actionIndex: action.index,
-          actionType: action.type,
-          originalError: fallbackErr
-        });
-      }
+      throw new ActionExecutionError(`Failed to click element: ${fallbackErr.message}`, {
+        actionIndex: action.index,
+        actionType: action.type,
+        originalError: fallbackErr
+      });
     }
   }
 
