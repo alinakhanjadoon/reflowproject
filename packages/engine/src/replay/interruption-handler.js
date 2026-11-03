@@ -839,10 +839,22 @@ class InterruptionHandler {
 
         const getWindowTitle = (w) => {
           const titleEl = w.querySelector(
-            '.x-window-header-text, .x-title-text, .x-window-header, .modal-title, .ui-dialog-title, [class*="title" i], [class*="header" i], h1, h2, h3, h4, [role="heading"]'
-          );
-          let text = (titleEl ? titleEl.textContent : w.textContent.slice(0, 120)) || '';
-          return text.toLowerCase().replace(/\b(close|dismiss|minimize|maximize|restore)\b/gi, '').replace(/\s+/g, ' ').trim();
+            '.x-window-header-text, .x-title-text, .x-header-text, .modal-title, .ui-dialog-title, [class*="title" i], h1, h2, h3, h4, [role="heading"]'
+          ) || w.querySelector('.x-window-header, [class*="header" i]');
+          let text = (titleEl ? titleEl.textContent : '') || '';
+          text = text.toLowerCase().replace(/\b(close|dismiss|minimize|maximize|restore)\b/gi, '').replace(/\s+/g, ' ').trim();
+          if (text.length >= 3) return text;
+
+          // Fallback: check inner grid header, tab panel, or table headers
+          const header = w.querySelector('.x-grid-header, .x-grid3-header, .x-tab-bar, thead, th, .x-panel-header');
+          if (header) {
+            const hText = (header.textContent || '').slice(0, 60).toLowerCase().replace(/\s+/g, ' ').trim();
+            if (hText.length >= 3) return hText;
+          }
+
+          const cls = (w.className || '').toString().trim();
+          if (cls.includes('x-window')) return 'ext-window-generic';
+          return (w.textContent || '').slice(0, 50).trim().toLowerCase() || 'dialog-generic';
         };
 
         const groups = new Map();
@@ -876,53 +888,66 @@ class InterruptionHandler {
           for (const dup of duplicatesToClose) {
             let dismissed = false;
 
-            // 1. Try finding and clicking close button inside duplicate window
-            const candidateButtons = Array.from(dup.querySelectorAll(
-              'button, a, [role="button"], .x-tool, .close, .btn-close, .modal-close, span, div'
-            )).filter(btn => {
-              if (!isVisible(btn)) return false;
-              const text = (btn.textContent || btn.value || '').trim();
-              const aria = (btn.getAttribute('aria-label') || '').trim();
-              const bTitle = (btn.getAttribute('title') || '').trim();
-              const cls = (typeof btn.className === 'string' ? btn.className : '').trim();
-              return /^(close|dismiss|exit|cancel|[×✕✖✗✘⨯xX+])$/i.test(text) ||
-                /close|dismiss/i.test(aria) ||
-                /close|dismiss/i.test(bTitle) ||
-                /x-tool-close|btn-close|modal-close|close/i.test(cls);
-            });
+            // 1. ExtJS native component destroy/close (most reliable for ERP ExtJS windows)
+            try {
+              if (typeof window.Ext !== 'undefined') {
+                let cmp = null;
+                if (window.Ext.getCmp) {
+                  cmp = window.Ext.getCmp(dup.id);
+                  if (!cmp && dup.parentElement) {
+                    cmp = window.Ext.getCmp(dup.parentElement.id);
+                  }
+                  if (!cmp && typeof dup.closest === 'function') {
+                    const idEl = dup.closest('[id]');
+                    if (idEl) cmp = window.Ext.getCmp(idEl.id);
+                  }
+                }
+                if (cmp) {
+                  if (typeof cmp.close === 'function') {
+                    cmp.close();
+                    dismissed = true;
+                  } else if (typeof cmp.destroy === 'function') {
+                    cmp.destroy();
+                    dismissed = true;
+                  } else if (typeof cmp.hide === 'function') {
+                    cmp.hide();
+                    dismissed = true;
+                  }
+                }
+              }
+            } catch {}
 
-            if (candidateButtons.length > 0) {
-              try {
+            // 2. Click close button inside duplicate window
+            try {
+              const candidateButtons = Array.from(dup.querySelectorAll(
+                'button, a, [role="button"], .x-tool, .x-tool-close, .close, .btn-close, .modal-close, span, div'
+              )).filter(btn => {
+                const text = (btn.textContent || btn.value || '').trim();
+                const aria = (btn.getAttribute('aria-label') || '').trim();
+                const bTitle = (btn.getAttribute('title') || '').trim();
+                const cls = (typeof btn.className === 'string' ? btn.className : '').trim();
+                return /^(close|dismiss|exit|cancel|[×✕✖✗✘⨯xX+])$/i.test(text) ||
+                  /close|dismiss/i.test(aria) ||
+                  /close|dismiss/i.test(bTitle) ||
+                  /x-tool-close|btn-close|modal-close|close/i.test(cls);
+              });
+
+              if (candidateButtons.length > 0) {
                 const btn = candidateButtons[0];
                 btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
                 btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                 btn.click?.();
                 dismissed = true;
-              } catch {}
-            }
+              }
+            } catch {}
 
-            // 2. ExtJS native component destroy fallback
-            if (!dismissed) {
-              try {
-                if (typeof window.Ext !== 'undefined' && window.Ext.getCmp) {
-                  const cmp = window.Ext.getCmp(dup.id);
-                  if (cmp && typeof cmp.close === 'function') {
-                    cmp.close();
-                    dismissed = true;
-                  } else if (cmp && typeof cmp.destroy === 'function') {
-                    cmp.destroy();
-                    dismissed = true;
-                  }
-                }
-              } catch {}
-            }
-
-            // 3. Fallback: hide/remove DOM element so it no longer interferes
-            const isStillInBody = Boolean(typeof document !== 'undefined' && document.body && typeof document.body.contains === 'function' && document.body.contains(dup));
-            if (!dismissed || isStillInBody) {
+            // 3. Guarantee DOM removal and hiding so duplicate NEVER remains visible on screen
+            try {
               if (dup.style) {
                 dup.style.display = 'none';
                 dup.style.visibility = 'hidden';
+                dup.style.left = '-10000px';
+                dup.style.top = '-10000px';
               }
               if (typeof dup.setAttribute === 'function') {
                 dup.setAttribute('aria-hidden', 'true');
@@ -931,10 +956,10 @@ class InterruptionHandler {
                 dup.classList.add('x-hidden', 'x-hidden-offsets');
               }
               if (typeof dup.remove === 'function') {
-                try { dup.remove(); } catch {}
+                dup.remove();
               }
               dismissed = true;
-            }
+            } catch {}
 
             if (dismissed) closedCount++;
           }

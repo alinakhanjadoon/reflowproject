@@ -184,20 +184,98 @@ class ReplayEngine extends EventEmitter {
   }
 
   /**
-   * Wait for any transient SPA/ExtJS loading masks, spinners, or aria-busy indicators to disappear
+   * Wait for any transient SPA/ExtJS loading masks, spinners, or aria-busy indicators to disappear.
+   * Resiliently detects fixed and absolute loading overlays, ExtJS masks, and text-based "Loading..." indicators.
    */
-  async _waitForLoadingMasks(timeoutMs = 8000) {
+  async _waitForLoadingMasks(timeoutMs = 15000) {
     if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
     try {
+      // Brief initial settle delay so asynchronous load masks have time to mount
+      await new Promise(r => setTimeout(r, 400));
+
       await this.page.waitForFunction(() => {
-        const masks = Array.from(document.querySelectorAll(
-          '.x-mask, .x-mask-loading, .x-mask-msg, .x-grid-empty, .x-masked, .loading-mask, .spinner-overlay, .loading, [aria-busy="true"], .dx-loadpanel'
-        ));
-        return !masks.some(m => {
-          if (m.offsetParent === null) return false;
-          const style = window.getComputedStyle(m);
-          return style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0.05;
+        const isElementVisible = (el) => {
+          if (!el) return false;
+          if (typeof Element !== 'undefined' && !(el instanceof Element)) return false;
+          const style = (window.getComputedStyle ? window.getComputedStyle(el) : el.style) || {};
+          if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') <= 0.05) {
+            return false;
+          }
+          const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+          if (rect && (rect.width === 0 || rect.height === 0)) return false;
+          return true;
+        };
+
+        const maskSelectors = [
+          '.x-mask',
+          '.x-mask-loading',
+          '.x-mask-msg',
+          '.x-mask-msg-inner',
+          '.x-grid-empty',
+          '.x-masked',
+          '.x-loading',
+          '.loading-mask',
+          '.spinner-overlay',
+          '.loading',
+          '[aria-busy="true"]',
+          '.dx-loadpanel',
+          '.ant-spin',
+          '.mat-progress-spinner',
+          '.mat-spinner',
+          '.mat-progress-bar',
+          '.spinner',
+          '.loading-spinner',
+          '.loader',
+          '.progress-bar',
+          '.k-loading-mask',
+          '.v-progress-circular'
+        ];
+
+        const explicitMasks = Array.from(document.querySelectorAll(maskSelectors.join(', '))).filter(isElementVisible);
+        if (explicitMasks.length > 0) return false;
+
+        // Visual / text-based "Loading..." or "Please wait..." modal overlays (like the centered white card with spinner)
+        const modalOverlays = Array.from(document.querySelectorAll('div, section, p, span, h1, h2, h3, h4')).filter(el => {
+          if (!isElementVisible(el)) return false;
+          const text = (el.textContent || '').trim().toLowerCase();
+          if (/^(loading\b|\bplease wait\b|\bloading\.\.\.|\bprocessing\b)/i.test(text) && text.length < 50) {
+            let cur = el;
+            while (cur && cur !== document.body) {
+              const s = window.getComputedStyle(cur);
+              if (s.position === 'fixed' || s.position === 'absolute' || parseInt(s.zIndex, 10) >= 10 || /modal|mask|dialog|card|panel|popup/i.test(cur.className || '')) {
+                return true;
+              }
+              cur = cur.parentElement;
+            }
+          }
+          return false;
         });
+
+        if (modalOverlays.length > 0) return false;
+
+        // Also check ExtJS global loading & store loading states
+        try {
+          if (typeof window.Ext !== 'undefined') {
+            if (window.Ext.Ajax && typeof window.Ext.Ajax.isLoading === 'function' && window.Ext.Ajax.isLoading()) return false;
+            if (window.Ext.getBody && typeof window.Ext.getBody === 'function') {
+              const b = window.Ext.getBody();
+              if (b && typeof b.isMasked === 'function' && b.isMasked()) return false;
+            }
+            if (window.Ext.ComponentQuery && typeof window.Ext.ComponentQuery.query === 'function') {
+              const grids = window.Ext.ComponentQuery.query('grid, tablepanel, window');
+              for (const g of grids) {
+                if (g && typeof g.getStore === 'function' && g.getStore() && typeof g.getStore().isLoading === 'function' && g.getStore().isLoading()) {
+                  return false;
+                }
+                if (g && g.loadMask && typeof g.loadMask.isVisible === 'function' && g.loadMask.isVisible()) {
+                  return false;
+                }
+              }
+            }
+          }
+        } catch {}
+
+        return true;
       }, { timeout: timeoutMs }).catch(() => {});
     } catch {}
   }
@@ -205,13 +283,22 @@ class ReplayEngine extends EventEmitter {
   /**
    * Wait for any active ExtJS AJAX requests to complete to prevent firing next action during background data loads.
    */
-  async _waitForExtAjaxIdle(timeoutMs = 8000) {
+  async _waitForExtAjaxIdle(timeoutMs = 15000) {
     if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
     try {
       await this.page.waitForFunction(() => {
         try {
-          if (typeof window.Ext !== 'undefined' && window.Ext.Ajax && typeof window.Ext.Ajax.isLoading === 'function') {
-            return !window.Ext.Ajax.isLoading();
+          if (typeof window.Ext !== 'undefined') {
+            if (window.Ext.Ajax && typeof window.Ext.Ajax.isLoading === 'function') {
+              if (window.Ext.Ajax.isLoading()) return false;
+            }
+            if (window.Ext.data?.Connection && typeof window.Ext.data.Connection.isLoading === 'function') {
+              if (window.Ext.data.Connection.isLoading()) return false;
+            }
+            if (window.Ext.getBody && typeof window.Ext.getBody === 'function') {
+              const b = window.Ext.getBody();
+              if (b && typeof b.isMasked === 'function' && b.isMasked()) return false;
+            }
           }
         } catch {}
         return true;
@@ -678,8 +765,8 @@ class ReplayEngine extends EventEmitter {
       }
 
       // 2. Wait for any active ExtJS/SPA loading masks or in-flight AJAX requests to clear
-      await this._waitForLoadingMasks(8000);
-      await this._waitForExtAjaxIdle(8000);
+      await this._waitForLoadingMasks(15000);
+      await this._waitForExtAjaxIdle(15000);
 
       if (this.isAborted) {
         throw new Error('Execution stopped by user');
@@ -781,11 +868,11 @@ class ReplayEngine extends EventEmitter {
       }
 
       // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-      await new Promise(r => setTimeout(r, 250));
+      await new Promise(r => setTimeout(r, 600));
 
       // Wait for any newly triggered loading masks or AJAX requests to clear before proceeding
-      await this._waitForLoadingMasks(8000);
-      await this._waitForExtAjaxIdle(8000);
+      await this._waitForLoadingMasks(15000);
+      await this._waitForExtAjaxIdle(15000);
 
       const scorePercent = Math.round(confidenceScore * 100);
       logger.action(index + 1, action.type, candidate.value, `score=${scorePercent}%`);
@@ -811,8 +898,14 @@ class ReplayEngine extends EventEmitter {
       if (!this.page) throw new Error('ReplayEngine is not connected to a page.');
       if (!itemHandle) throw new Error('No collection item handle supplied.');
 
+      // Proactively close duplicate background modal windows before item action
+      if (typeof this.interruptionHandler?.closeDuplicateWindows === 'function' && this.page) {
+        await this.interruptionHandler.closeDuplicateWindows(this.page).catch(() => {});
+      }
+
       await this._waitWhilePaused();
-      await this._waitForLoadingMasks(6000);
+      await this._waitForLoadingMasks(15000);
+      await this._waitForExtAjaxIdle(15000);
 
       // Check if action targets an ephemeral anchor injected by client download scripts
       if (isTransientProgrammaticDownloadAction(action)) {
@@ -848,9 +941,9 @@ class ReplayEngine extends EventEmitter {
         }
 
         // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-        await new Promise(r => setTimeout(r, 200));
-        await this._waitForLoadingMasks(8000);
-        await this._waitForExtAjaxIdle(8000);
+        await new Promise(r => setTimeout(r, 600));
+        await this._waitForLoadingMasks(15000);
+        await this._waitForExtAjaxIdle(15000);
 
         return { success: true, scoped: true };
       } finally {
@@ -1307,8 +1400,8 @@ class ReplayEngine extends EventEmitter {
         if (typeof this.interruptionHandler?.closeDuplicateWindows === 'function' && this.page) {
           await this.interruptionHandler.closeDuplicateWindows(this.page).catch(() => {});
         }
-        await this._waitForLoadingMasks(8000);
-        await this._waitForExtAjaxIdle(8000);
+        await this._waitForLoadingMasks(15000);
+        await this._waitForExtAjaxIdle(15000);
 
         // 1. Condition-based wait & resolve element
         const { elementHandle, candidate, confidenceScore } = await this.waitForTargetElement(
@@ -1348,9 +1441,9 @@ class ReplayEngine extends EventEmitter {
         logger.action(action.index + 1, action.type, candidate.value, detail);
 
         // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-        await new Promise(r => setTimeout(r, 200));
-        await this._waitForLoadingMasks(8000);
-        await this._waitForExtAjaxIdle(8000);
+        await new Promise(r => setTimeout(r, 600));
+        await this._waitForLoadingMasks(15000);
+        await this._waitForExtAjaxIdle(15000);
 
         // Calculate humanized post-action timing delay
         const postDelay = ActionDispatcher.calculatePostActionDelay(this.botConfig);

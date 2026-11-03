@@ -45,7 +45,7 @@ const DEFAULT_TIMEOUTS = Object.freeze({
   ERP_RESOLUTION_TIMEOUT_MS: 15000,
   ERP_POLL_INTERVAL_MS: 150,
   TYPE_KEYSTROKE_DELAY_MS: 20,
-  POST_ACTION_DELAY_MS: 300
+  POST_ACTION_DELAY_MS: 500
 });
 
 // Patterns to detect unstable / dynamic IDs (e.g. React 18 useId `:r1:`, Angular Material `mat-select-`, `mat-option-`, `cdk-overlay-`, `ng-`, Sencha/ExtJS `gridview-`, `record-`, `tableview-`, `toolbar-`, `container-`, long hashes, UUIDs)

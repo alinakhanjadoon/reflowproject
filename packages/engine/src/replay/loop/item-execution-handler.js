@@ -108,7 +108,7 @@ class ItemExecutionHandler {
     if (replayEngine) {
       await replayEngine.dismissOverlays().catch(() => {});
       if (typeof replayEngine._waitForLoadingMasks === 'function') {
-        await replayEngine._waitForLoadingMasks(2500).catch(() => {});
+        await replayEngine._waitForLoadingMasks(10000).catch(() => {});
       }
     } else if (page.keyboard) {
       await page.keyboard.press('Escape').catch(() => {});
@@ -121,7 +121,7 @@ class ItemExecutionHandler {
       return this.gridAdapter ? this.gridAdapter.isCollectionPresent(page, discovery) : true;
     };
 
-    const waitForPresence = async (timeoutMs = 3000) => {
+    const waitForPresence = async (timeoutMs = 8000) => {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         if (await checkPresence()) return true;
@@ -1033,6 +1033,17 @@ class ItemExecutionHandler {
 
           const beforeActionFiles = snapshotDownloadedFiles();
 
+          // Proactively close duplicate background modal windows before item action
+          if (replayEngine && typeof replayEngine.interruptionHandler?.closeDuplicateWindows === 'function' && page) {
+            await replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
+          }
+
+          // Ensure any loading masks or in-flight AJAX requests settle before proceeding
+          if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
+            await replayEngine._waitForLoadingMasks(15000).catch(() => {});
+            await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+          }
+
           if (isDropdown && actionOffset === 0 && action.scope === 'item') {
             // Sequential single-selection dropdown checkbox logic:
             // 1. Ensure dropdown is open
@@ -1155,6 +1166,12 @@ class ItemExecutionHandler {
             i,
             itemResult
           );
+          // Pacing settle delay for legacy enterprise portals & ensure loading masks settle
+          await new Promise(r => setTimeout(r, 800));
+          if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
+            await replayEngine._waitForLoadingMasks(15000).catch(() => {});
+            await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+          }
           await new Promise(r => setTimeout(r, 300));
         }
 
@@ -1166,6 +1183,10 @@ class ItemExecutionHandler {
 
         // Allow the complete per-item procedure to settle before restoring state.
         await new Promise(r => setTimeout(r, 800));
+        if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
+          await replayEngine._waitForLoadingMasks(15000).catch(() => {});
+          await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+        }
 
         // Check if any late download arrived for this item (e.g. late export/save response)
         if (downloadsDir && fs.existsSync(downloadsDir)) {

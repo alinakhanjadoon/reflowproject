@@ -107,13 +107,13 @@ async function runTests() {
       waitForFunction: async (fn, opts) => {
         // Evaluate condition
         const fnStr = fn.toString();
+        if (fnStr.includes('x-mask')) {
+          maskVisible = false;
+          return true;
+        }
         if (fnStr.includes('Ext.Ajax')) {
           // Simulate Ext.Ajax finishing after wait
           ajaxLoading = false;
-          return true;
-        }
-        if (fnStr.includes('x-mask')) {
-          maskVisible = false;
           return true;
         }
         return true;
