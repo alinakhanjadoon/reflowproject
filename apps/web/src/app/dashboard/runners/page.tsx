@@ -161,7 +161,7 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
           const json = await res.json();
           if (json.runners && Array.isArray(json.runners) && json.runners.length > 0) {
             if (json.token_configured === true) setTokenConfigured(true);
-            if (typeof json.token_revoked === 'boolean') setIsTokenRevoked(json.token_revoked);
+            if (typeof json.token_revoked === 'boolean' && !currentToken) setIsTokenRevoked(json.token_revoked);
             apiRunners = json.runners.map((r: { id?: string; hostname?: string; label?: string; platform?: string; engineVersion?: string; status?: string; lastPingAt?: string | null; cdpActive?: boolean }, idx: number) => {
               const lastPingMs = r.lastPingAt ? new Date(r.lastPingAt).getTime() : 0;
               const diffSeconds = lastPingMs > 0 ? (Date.now() - lastPingMs) / 1000 : 999999;
@@ -223,7 +223,7 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
                 status = 'ONLINE';
               }
 
-              if (meta.token_revoked === true) setIsTokenRevoked(true);
+              if (meta.token_revoked === true && !currentToken) setIsTokenRevoked(true);
               if (orgDirect.runner_token_hash) setTokenConfigured(true);
               apiRunners = [
                 {
@@ -603,12 +603,12 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
 
               <span
                 className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                  isTokenRevoked
+                  isTokenRevoked && !currentToken
                     ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                     : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 }`}
               >
-                {isTokenRevoked ? 'REVOKED' : 'ACTIVE'}
+                {isTokenRevoked && !currentToken ? 'REVOKED' : 'ACTIVE'}
               </span>
             </div>
 
@@ -624,7 +624,7 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
                       value={currentToken}
                       onClick={(e) => (e.target as HTMLInputElement).select()}
                       className={`bg-transparent border-0 font-mono text-xs w-full outline-none select-all ${
-                        isTokenRevoked ? 'line-through text-slate-500' : 'text-cyan-300'
+                        isTokenRevoked && !currentToken ? 'line-through text-slate-500' : 'text-cyan-300'
                       }`}
                       aria-label="Runner pairing token"
                     />
@@ -654,7 +654,7 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
                   <button
                     type="button"
                     onClick={() => copyToClipboard(currentToken)}
-                    disabled={isTokenRevoked || !currentToken}
+                    disabled={!currentToken}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg text-xs font-sans font-semibold border border-cyan-400/30 transition-all disabled:opacity-50"
                     title="Copy secret pairing token"
                   >
