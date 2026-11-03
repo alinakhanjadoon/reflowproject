@@ -160,16 +160,56 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnGetTokenHelp.addEventListener('click', () => {
-    const cloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
-    clientBridge.openExternal(`${cloudUrl}/dashboard`);
+    const rawCloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
+    const cleanUrl = rawCloudUrl.trim().replace(/\/+$/, '');
+    clientBridge.openExternal(`${cleanUrl}/dashboard/runners`);
   });
 
   setupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const token = inputSetupToken.value.trim().replace(/[\.\s]+$/, '');
-    if (!token) return;
+    let token = inputSetupToken.value.trim();
+    // Strip surrounding quotes
+    token = token.replace(/^["']|["']$/g, '');
+    // Strip accidental "Bearer " prefix
+    if (token.toLowerCase().startsWith('bearer ')) {
+      token = token.slice(7).trim();
+    }
+    // Strip trailing whitespace, dots, and ellipsis
+    token = token.replace(/[\.\s…]+$/, '');
 
-    const targetCloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
+    if (!token) {
+      showFeedback('Please enter your runner pairing token.', 'error');
+      return;
+    }
+
+    // Check for masked bullet characters
+    if (token.includes('•') || token.includes('\u2022')) {
+      showFeedback('This token contains hidden bullet characters (•). Please visit the Web Console, click "Regenerate Token", and use the "Copy Token" button to copy the real secret.', 'error');
+      return;
+    }
+
+    // Check token prefix
+    if (!token.startsWith('rf_live_')) {
+      showFeedback('Invalid token format. ReFlow runner tokens must begin with "rf_live_". Please copy your token from the Web Console.', 'error');
+      return;
+    }
+
+    // Check secret length and completeness
+    const tokenParts = token.slice('rf_live_'.length).split('_');
+    if (tokenParts.length !== 2 || tokenParts[0].length !== 16 || tokenParts[1].length !== 32) {
+      if (tokenParts.length === 2 && tokenParts[1].length < 32) {
+        showFeedback(`Incomplete token: secret has ${tokenParts[1].length} characters (expected 32). The token was truncated when copied. Please use the "Copy Token" button in the Web Console.`, 'error');
+      } else {
+        showFeedback(`Invalid token length (${token.length} chars, expected 57). ReFlow tokens follow the format: rf_live_<16 hex>_<32 hex>. Please copy the full token using the "Copy Token" button.`, 'error');
+      }
+      return;
+    }
+
+    let targetCloudUrl = (inputSetupCloudUrl && inputSetupCloudUrl.value.trim()) || currentConfig.cloudUrl || 'https://reflowproject-web.vercel.app';
+    targetCloudUrl = targetCloudUrl.trim().replace(/\/+$/, '');
+    if (targetCloudUrl === 'https://web-fawn-ten-55.vercel.app') {
+      targetCloudUrl = 'https://reflowproject-web.vercel.app';
+    }
 
     btnConnectWorkspace.disabled = true;
     btnConnectWorkspace.innerText = 'Verifying Token...';
@@ -183,7 +223,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       if (!testRes || !testRes.connected) {
-        showFeedback(testRes?.error || 'Could not verify token. Please check endpoint and token.', 'error');
+        showFeedback(testRes?.error || `Could not verify token against ${targetCloudUrl}. Please check endpoint and token.`, 'error');
         return;
       }
 

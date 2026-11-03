@@ -64,7 +64,12 @@ export async function authenticateRunnerOrUser(request: NextRequest): Promise<Ru
 
   // If a bearer or runner token header was provided:
   if (runnerToken !== null) {
-    if (!runnerToken.startsWith('rf_live_')) {
+    let cleanToken = runnerToken.trim().replace(/^["']|["']$/g, '').replace(/[\.\s…]+$/, '');
+    if (cleanToken.toLowerCase().startsWith('bearer ')) {
+      cleanToken = cleanToken.slice(7).trim();
+    }
+
+    if (!cleanToken.startsWith('rf_live_')) {
       return {
         success: false,
         error: 'Unauthorized: Invalid runner token format. Expected rf_live_<org_id>_<secret>',
@@ -72,7 +77,7 @@ export async function authenticateRunnerOrUser(request: NextRequest): Promise<Ru
       };
     }
 
-    const tokenContent = runnerToken.slice('rf_live_'.length).trim();
+    const tokenContent = cleanToken.slice('rf_live_'.length).trim();
     const parts = tokenContent.split('_');
     const orgPrefix = parts[0];
     const secret = parts[1];
@@ -84,14 +89,38 @@ export async function authenticateRunnerOrUser(request: NextRequest): Promise<Ru
       };
     }
 
-    const tokenHash = crypto.createHash('sha256').update(runnerToken).digest('hex');
+    if (secret.includes('•') || secret.includes('\u2022')) {
+      return {
+        success: false,
+        error: 'Unauthorized: Runner token contains masked bullet characters (•). Please regenerate and copy the full token from the web console.',
+        status: 401,
+      };
+    }
+
+    if (secret.length < 32) {
+      return {
+        success: false,
+        error: `Unauthorized: Incomplete runner token secret (received ${secret.length} characters, expected 32). Please copy the full token using the Copy button.`,
+        status: 401,
+      };
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
 
     // 1. Direct lookup by runner_token_hash (optimal and safe)
-    let { data: org } = await client
+    let { data: org, error: queryError } = await client
       .from('wf_organizations')
       .select('id, name, runner_metadata, runner_token_hash')
       .eq('runner_token_hash', tokenHash)
       .maybeSingle();
+
+    if (queryError) {
+      return {
+        success: false,
+        error: `Database error during runner authentication: ${queryError.message}`,
+        status: 500,
+      };
+    }
 
     // 2. Fallback check: lookup by exact UUID if token hash was stored inside runner_metadata
     if (!org && UUID_REGEX.test(orgPrefix)) {

@@ -142,7 +142,7 @@ class CloudClient {
         }
         const errorMsg = rawError || `HTTP ${response.status} ${response.statusText}`;
         throw new CloudClientError(
-          `Cloud API Error [${response.status}] ${path}: ${errorMsg}`,
+          `Cloud API Error [${response.status}] at ${this.baseUrl}${path}: ${errorMsg}`,
           response.status,
           responseData,
           path

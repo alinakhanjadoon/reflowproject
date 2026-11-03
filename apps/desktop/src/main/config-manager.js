@@ -52,7 +52,15 @@ class ConfigManager {
     try {
       const raw = fs.readFileSync(this.configFile, 'utf8').replace(/^\uFEFF/, '');
       const parsed = JSON.parse(raw);
-      return { ...this.getDefaults(), ...parsed };
+      const merged = { ...this.getDefaults(), ...parsed };
+      // Migrate deprecated Vercel URLs to canonical cloudUrl
+      if (merged.cloudUrl === 'https://web-fawn-ten-55.vercel.app') {
+        merged.cloudUrl = 'https://reflowproject-web.vercel.app';
+      }
+      if (typeof merged.cloudUrl === 'string') {
+        merged.cloudUrl = merged.cloudUrl.trim().replace(/\/+$/, '');
+      }
+      return merged;
     } catch (err) {
       console.warn('Failed to parse config file, returning defaults:', err);
       return this.getDefaults();
@@ -70,6 +78,15 @@ class ConfigManager {
         } catch {}
       }
       const updated = { ...current, ...newConfig };
+      if (typeof updated.cloudUrl === 'string') {
+        updated.cloudUrl = updated.cloudUrl.trim().replace(/\/+$/, '');
+        if (updated.cloudUrl === 'https://web-fawn-ten-55.vercel.app') {
+          updated.cloudUrl = 'https://reflowproject-web.vercel.app';
+        }
+      }
+      if (typeof updated.runnerToken === 'string') {
+        updated.runnerToken = updated.runnerToken.trim().replace(/[\.\s…]+$/, '');
+      }
       fs.writeFileSync(this.configFile, JSON.stringify(updated, null, 2), 'utf8');
       return updated;
     } catch (err) {

@@ -161,6 +161,7 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
           const json = await res.json();
           if (json.runners && Array.isArray(json.runners) && json.runners.length > 0) {
             if (json.token_configured === true) setTokenConfigured(true);
+            if (typeof json.token_revoked === 'boolean') setIsTokenRevoked(json.token_revoked);
             apiRunners = json.runners.map((r: { id?: string; hostname?: string; label?: string; platform?: string; engineVersion?: string; status?: string; lastPingAt?: string | null; cdpActive?: boolean }, idx: number) => {
               const lastPingMs = r.lastPingAt ? new Date(r.lastPingAt).getTime() : 0;
               const diffSeconds = lastPingMs > 0 ? (Date.now() - lastPingMs) / 1000 : 999999;
@@ -247,7 +248,6 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
       }
 
       if (apiRunners.length > 0) {
-        setIsTokenRevoked(apiRunners.some((runner) => runner.status === 'REVOKED'));
         setWorkers(apiRunners);
       } else {
         setWorkers([]);
@@ -457,11 +457,13 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
       if (!newToken) throw new Error('The server did not return a new pairing token. Please try again.');
 
       setCurrentToken(newToken);
+      setIsTokenMasked(false);
       setTokenConfigured(true);
       setIsTokenRevoked(false);
       setShowRegenModal(false);
       setRegenConfirmChecked(false);
-      setActionSuccessNotice('Pairing token successfully regenerated! Active workers must update their token.');
+      copyToClipboard(newToken);
+      setActionSuccessNotice('Pairing token successfully regenerated and copied to clipboard! Paste it into ReFlow Desktop.');
       setTimeout(() => setActionSuccessNotice(null), 6000);
 
       await refreshDashboard();
@@ -613,33 +615,44 @@ const [tokenConfigured, setTokenConfigured] = useState<boolean>(false);
             {/* Token Display & Interactive Actions */}
             <div className="space-y-2">
               <div className="bg-slate-950/80 border border-white/10 rounded-xl p-3 flex items-center justify-between gap-3 font-mono text-xs">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto">
                   <Key className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
-                  <span
-                    className={`truncate tracking-wide select-all ${
-                      isTokenRevoked ? 'line-through text-slate-500' : 'text-cyan-300'
-                    }`}
-                  >
-                    {isTokenMasked && currentToken
-                      ? `${currentToken.slice(0, 10)}${'•'.repeat(24)}${currentToken.slice(-4)}`
-                      : currentToken || (isTokenRevoked
-                          ? 'Token revoked'
-                          : tokenConfigured
-                            ? '•••••••••••••••• (hidden — regenerate to reveal)'
-                            : 'No token issued yet — regenerate to create one')}
-                  </span>
+                  {currentToken ? (
+                    <input
+                      type={isTokenMasked ? 'password' : 'text'}
+                      readOnly
+                      value={currentToken}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                      className={`bg-transparent border-0 font-mono text-xs w-full outline-none select-all ${
+                        isTokenRevoked ? 'line-through text-slate-500' : 'text-cyan-300'
+                      }`}
+                      aria-label="Runner pairing token"
+                    />
+                  ) : (
+                    <span className="text-slate-400 text-xs">
+                      {isTokenRevoked
+                        ? 'Token revoked'
+                        : tokenConfigured
+                          ? '•••••••••••••••• (hidden — regenerate to reveal)'
+                          : 'No token issued yet — regenerate to create one'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
-                    onClick={() => setIsTokenMasked(!isTokenMasked)}
-                    className="p-1.5 hover:bg-white/5 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
-                    title={isTokenMasked ? 'Reveal Token' : 'Mask Token'}
-                  >
-                    {isTokenMasked ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                  </button>
+                  {currentToken && (
+                    <button
+                      type="button"
+                      onClick={() => setIsTokenMasked(!isTokenMasked)}
+                      className="p-1.5 hover:bg-white/5 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                      title={isTokenMasked ? 'Reveal Token' : 'Mask Token'}
+                    >
+                      {isTokenMasked ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
 
                   <button
+                    type="button"
                     onClick={() => copyToClipboard(currentToken)}
                     disabled={isTokenRevoked || !currentToken}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-lg text-xs font-sans font-semibold border border-cyan-400/30 transition-all disabled:opacity-50"

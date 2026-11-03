@@ -134,6 +134,7 @@ export async function GET(request: NextRequest) {
         success: true,
         is_online: anyWorkerOnline,
         token_configured: hasToken,
+        token_revoked: runnerMeta.token_revoked === true,
         diff_seconds: Math.round(diffSeconds),
         runners,
       },
