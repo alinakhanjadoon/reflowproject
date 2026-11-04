@@ -186,6 +186,34 @@ export function deriveLoopSignals(definition: unknown, stepsInput?: unknown): Lo
   const flaggedIndex = steps.findIndex(isLoopFlaggedStep);
   const extractionIndex = steps.findIndex(isExtractionStep);
 
+  let candidateRowIndex: number | null = null;
+  if (flaggedIndex >= 0) {
+    candidateRowIndex = flaggedIndex;
+  } else if (extractionIndex >= 0) {
+    candidateRowIndex = extractionIndex;
+  } else {
+    // Check if any step represents a table row or grid cell (ignoring setup / auth)
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i] as any;
+      if (!s) continue;
+      const name = String(s.name || s.elementName || s.target?.elementName || '').toLowerCase();
+      const type = String(s.type || s.action || '').toUpperCase();
+      if (type === 'NAVIGATE' || /(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) continue;
+      const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
+      const role = String(s.target?.fingerprint?.role || s.fingerprint?.role || '').toLowerCase();
+      const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+      const selStr = candidates.map((c: any) => c.value || '').join(' ');
+      if (
+        tag === 'TR' || tag === 'TD' || role === 'row' || role === 'gridcell' ||
+        /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.data-row|\.grid-row)\b/i.test(selStr) ||
+        /\b(table\s*row|grid\s*row|invoice\s*row|row\s*item)\b/i.test(name)
+      ) {
+        candidateRowIndex = i;
+        break;
+      }
+    }
+  }
+
   const isLoop = Boolean(
     def.isLoop === true ||
     metadata.isLoop === true ||
@@ -199,7 +227,7 @@ export function deriveLoopSignals(definition: unknown, stepsInput?: unknown): Lo
     asIndex(def.loopStepIndex, stepCount) ??
     asIndex(metadata.loopStepIndex, stepCount) ??
     asIndex(settings.loopStepIndex, stepCount) ??
-    (flaggedIndex >= 0 ? flaggedIndex : extractionIndex >= 0 ? extractionIndex : null);
+    candidateRowIndex;
 
   let derivedLoop: LoopConfig | null = null;
   if (isLoop && stepCount > 0) {

@@ -74,44 +74,65 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
   );
   if (roleIdx >= 0) return roleIdx;
 
-  // 2. Step targeting table rows, dropdown options, list items, or collection items
-  const rowIdx = steps.findIndex((s: any) => {
+  // Helper to identify auth, login, setup inputs, and navigation actions
+  const isAuthOrSetup = (s: any) => {
     if (!s) return false;
+    const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
+    const type = String(s.type || s.action || '').toUpperCase();
+    const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toLowerCase();
+    const inputType = String(s.target?.fingerprint?.type || s.fingerprint?.type || '').toLowerCase();
+    if (type === 'NAVIGATE') return true;
+    if (/(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) return true;
+    if (tag === 'input' && (inputType === 'password' || inputType === 'email')) return true;
+    return false;
+  };
+
+  // 2. Step targeting table rows, grid cells, or records (prioritized over all other patterns)
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (isAuthOrSetup(s)) continue;
+
     const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
     const role = (s.target?.fingerprint?.role || '').toLowerCase();
     const text = (s.name || s.elementName || s.description || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
     const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
-    const selectors = candidates.map((c: any) => c.value || '').join(' ').toLowerCase();
+    const selectors = candidates.map((c: any) => c.value || '').join(' ');
 
-    return (
+    const isTableRowOrGrid = Boolean(
       tag === 'TR' ||
       tag === 'TD' ||
-      tag === 'MAT-OPTION' ||
-      tag === 'OPTION' ||
-      tag === 'LI' ||
       role === 'row' ||
       role === 'gridcell' ||
-      role === 'option' ||
-      role === 'listitem' ||
-      selectors.includes('mat-option') ||
-      selectors.includes('option') ||
-      selectors.includes('tr') ||
-      selectors.includes('tbody') ||
-      selectors.includes('data-row') ||
-      selectors.includes('.row') ||
-      text.includes('table row') ||
-      text.includes('row item') ||
-      text.includes('invoice row')
+      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors) ||
+      /\b(table\s*row|grid\s*row|invoice\s*row|row\s*item)\b/i.test(text)
     );
-  });
-  if (rowIdx >= 0) return rowIdx;
 
-  // 3. Fallback: find the first non-login action that performs a business operation
+    if (isTableRowOrGrid) return i;
+  }
+
+  // 3. Dropdown options or list items
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (isAuthOrSetup(s)) continue;
+
+    const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
+    const role = (s.target?.fingerprint?.role || '').toLowerCase();
+    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+    const selectors = candidates.map((c: any) => c.value || '').join(' ');
+
+    const isOptionOrListItem = Boolean(
+      tag === 'MAT-OPTION' || tag === 'OPTION' || tag === 'LI' ||
+      role === 'option' || role === 'listitem' ||
+      /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|li:nth-child)\b/i.test(selectors)
+    );
+
+    if (isOptionOrListItem) return i;
+  }
+
+  // 4. Fallback: find the first non-login non-setup business action
   const nonLoginIdx = steps.findIndex((s: any, idx: number) => {
     if (idx === 0) return false;
-    const name = String(s.name || s.elementName || '').toLowerCase();
-    const type = String(s.type || s.action || '').toUpperCase();
-    return type !== 'NAVIGATE' && !/user|password|login|auth|submit/i.test(name);
+    return !isAuthOrSetup(s);
   });
   if (nonLoginIdx >= 0) return nonLoginIdx;
 
@@ -123,7 +144,7 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
   if (!workflow) return ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'];
   const fields = new Set<string>();
 
-  const IGNORED_COLUMN_NAMES = /^(select|selection|checkbox|actions?|operations?|manage|controls?|tools?|_cells|_rawtext|text|label|fulltext)$/i;
+  const IGNORED_COLUMN_NAMES = /^(select|selection|checkbox|actions?|operations?|manage|controls?|tools?|_cells|_rawtext|text|label|fulltext|username(\s*input)?|email|password(\s*password\s*field)?|login(\s*button)?|sign\s*in|company(\s*input|\s*link)?|close(\s*button)?|submit|button|element|click|open\s*selected|scroll.*)$/i;
 
   const addCleanCol = (raw: unknown) => {
     if (typeof raw !== 'string') return;
@@ -137,7 +158,7 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     fields.add(str);
   };
 
-  // 1. From workflow filter_rules
+  // 1. From workflow filter_rules (Highest priority: actual captured table headers)
   const fr = (workflow.filter_rules || {}) as Record<string, unknown>;
   if (Array.isArray(fr.available_fields)) fr.available_fields.forEach(addCleanCol);
   if (Array.isArray(fr.columns)) fr.columns.forEach(addCleanCol);
@@ -156,13 +177,12 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     Object.keys(wdFr.fieldValues).forEach(addCleanCol);
   }
 
-  // 3. From steps or actions
+  // 3. From table context in recorded steps
   const steps = getWorkflowSteps(workflow);
   steps.forEach((step: any) => {
     if (!step) return;
     addCleanCol(step.extract_column);
     addCleanCol(step.column);
-    addCleanCol(step.field);
     addCleanCol(step.columnName);
     addCleanCol(step.headerName);
 
@@ -174,28 +194,23 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
       }
     }
 
-    // Target elements and friendly names
-    const target = step.target || {};
-    addCleanCol(target.elementName);
-    addCleanCol(target.friendlyName);
-    addCleanCol(step.elementName);
-
-    const fp = target.fingerprint || step.fingerprint;
+    const fp = step.target?.fingerprint || step.fingerprint;
     if (fp) {
       addCleanCol(fp.columnName);
       addCleanCol(fp.headerName);
       if (fp.attributes && typeof fp.attributes === 'object') {
         addCleanCol(fp.attributes['data-column']);
         addCleanCol(fp.attributes['data-field']);
-        addCleanCol(fp.attributes['name']);
-        addCleanCol(fp.attributes['id']);
-        addCleanCol(fp.attributes['aria-label']);
-        addCleanCol(fp.attributes['placeholder']);
       }
     }
   });
 
-  // 4. Common table fields
+  // If table columns were captured, return them cleanly
+  if (fields.size > 0) {
+    return Array.from(fields);
+  }
+
+  // Fallback common table fields only if no columns were discovered
   const commonFields = ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'];
   commonFields.forEach(addCleanCol);
 

@@ -316,17 +316,21 @@
     for (const attr of CONSTANTS.PREFERRED_DATA_ATTRIBUTES) {
       if (element.hasAttribute(attr)) {
         const val = element.getAttribute(attr);
-        addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `[${attr}="${escapeCss(val)}"]`);
-        addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `${tag}[${attr}="${escapeCss(val)}"]`);
+        if (val && isStableId(val)) {
+          addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `[${attr}="${escapeCss(val)}"]`);
+          addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `${tag}[${attr}="${escapeCss(val)}"]`);
+        }
       }
     }
 
-    // Check any other custom data-* attributes
+    // Check any other custom data-* attributes (verifying value is stable and not dynamic like button-1998)
     if (element.attributes) {
       for (let i = 0; i < element.attributes.length; i++) {
         const attr = element.attributes[i];
         if (attr.name.startsWith('data-') && !CONSTANTS.PREFERRED_DATA_ATTRIBUTES.includes(attr.name)) {
-          addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `[${attr.name}="${escapeCss(attr.value)}"]`);
+          if (attr.value && isStableId(attr.value)) {
+            addCandidate(CONSTANTS.SELECTOR_STRATEGIES.DATA_ATTR, `[${attr.name}="${escapeCss(attr.value)}"]`);
+          }
         }
       }
     }
@@ -937,6 +941,20 @@
 
     if (!tagMatchesExact) {
       score *= 0.95;
+    }
+
+    // Strict action element text mismatch penalty:
+    // If an action element (button, link, menu item) has an explicit recorded text label (e.g. "Close", "Save"),
+    // an element with completely conflicting text (e.g. "Archive") must not be accepted!
+    const isActionElement = (
+      element.tagName === 'BUTTON' ||
+      element.tagName === 'A' ||
+      (element.getAttribute && (element.getAttribute('role') === 'button' || element.getAttribute('role') === 'menuitem')) ||
+      hasElementClass(element, 'x-btn') ||
+      hasElementClass(element, 'btn')
+    );
+    if (isActionElement && targetText && elemText && targetText.length >= 2 && elemText.length >= 2 && textScore === 0.0) {
+      score *= 0.25; // Severely penalize conflicting button text so it falls below MIN_CONFIDENCE_THRESHOLD
     }
 
     const roundedScore = Math.round(score * 100) / 100;
