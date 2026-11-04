@@ -718,9 +718,10 @@ class InterruptionHandler {
    * @returns {Promise<any>}
    */
   async executeWithRecovery(page, action, executionFn) {
-    // Proactive check: clear any native browser alert() or confirm() sitting unhandled
+    // Proactive checks: clear any dialog or unexpected overlay sitting unhandled before running action
     if (page && (typeof page.isClosed !== 'function' || !page.isClosed())) {
       await this.clearLingeringDialogs(page).catch(() => {});
+      await this.dismissBlockingOverlays(page, action).catch(() => {});
     }
 
     try {
