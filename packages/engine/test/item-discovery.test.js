@@ -87,6 +87,14 @@ function runItemDiscoveryTests() {
   assert.strictEqual(bestGridCandidate.ancestorTag, 'div');
   console.log('  ✅ Multi-record grid candidate priority passed\n');
 
+  console.log('🔹 Test 8: Multi-record collection strictly beats single-item candidate even with lower score');
+  const singleItemCell = { score: 0.95, itemCount: 1, ancestorTag: 'td', itemTag: 'div' };
+  const multiRecordGrid = { score: 0.74, itemCount: 15, ancestorTag: 'div', itemTag: 'table' };
+  const winner = ItemDiscovery.selectBestCandidate([singleItemCell, multiRecordGrid]);
+  assert.strictEqual(winner.itemCount, 15, 'Multi-record collection (itemCount: 15) must beat single-item candidate (itemCount: 1) regardless of score difference');
+  assert.strictEqual(winner.ancestorTag, 'div');
+  console.log('  ✅ Multi-record candidate precedence over single-item passed\n');
+
   console.log('🎉 ALL ITEM DISCOVERY TESTS PASSED SUCCESSFULLY!\n');
 }
 

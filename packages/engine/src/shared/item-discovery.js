@@ -288,10 +288,15 @@ class ItemDiscovery {
       for (const ancestor of ancestors) {
         if (isNavOrChrome(ancestor)) continue;
 
-        // Table rows (<tr> / [role="row"]) contain table cells (columns), NOT repeating records.
+        // Table cells (<td> / <th> / [role="gridcell"]) and table rows (<tr> / [role="row"]) contain cells/columns, NOT repeating records.
         const ancTag = ancestor.tagName.toLowerCase();
         const ancRole = (ancestor.getAttribute('role') || '').toLowerCase();
         if (
+          ancTag === 'td' ||
+          ancTag === 'th' ||
+          ancRole === 'gridcell' ||
+          ancRole === 'cell' ||
+          ancestor.classList?.contains('x-grid-cell') ||
           ancTag === 'tr' ||
           ancRole === 'row' ||
           ancestor.classList?.contains('x-grid-row') ||
@@ -301,9 +306,9 @@ class ItemDiscovery {
           continue;
         }
 
-        // If an ancestor has only 1 child and is an internal table/tbody inside a virtualized grid container, skip it
-        if (ancestor.children.length === 1 && (ancTag === 'tbody' || ancTag === 'table')) {
-          const parentGrid = ancestor.closest?.('.x-grid-item-container, .x-grid-view, [role="grid"], .data-table, .grid-container');
+        // If an ancestor has only 1 child and is an internal table/tbody/wrapper inside a grid container, skip it
+        if (ancestor.children.length === 1) {
+          const parentGrid = ancestor.closest?.('.x-grid-item-container, .x-grid-view, [role="grid"], .data-table, .grid-container, table');
           if (parentGrid) {
             continue;
           }
@@ -765,12 +770,13 @@ class ItemDiscovery {
       }
 
       candidates.sort((a, b) => {
+        // Multi-item collections must always take precedence over a single-item candidate
+        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
+          return b.itemCount > 1 ? 1 : -1;
+        }
         const scoreDiff = b.score - a.score;
         if (Math.abs(scoreDiff) > 0.15) {
           return scoreDiff;
-        }
-        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
-          return b.itemCount > 1 ? 1 : -1;
         }
         if (b.itemCount !== a.itemCount) {
           return b.itemCount - a.itemCount;
@@ -1077,12 +1083,13 @@ class ItemDiscovery {
     return candidates
       .filter(c => c && typeof c.score === 'number' && !this.isNavigationCandidate(c))
       .sort((a, b) => {
+        // Multi-item collections must always take precedence over a single-item candidate
+        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
+          return b.itemCount > 1 ? 1 : -1;
+        }
         const scoreDiff = b.score - a.score;
         if (Math.abs(scoreDiff) > 0.15) {
           return scoreDiff;
-        }
-        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
-          return b.itemCount > 1 ? 1 : -1;
         }
         if (b.itemCount !== a.itemCount) {
           return b.itemCount - a.itemCount;

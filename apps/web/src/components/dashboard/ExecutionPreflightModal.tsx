@@ -318,14 +318,14 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
       step.options.forEach((opt: any) => {
         const text = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.value);
         if (targetField) addValue(targetField, text);
-        addValue('Type', text);
+        if (targetField && /type/i.test(targetField)) addValue('Type', text);
       });
     }
     if (Array.isArray(step.selectOptions)) {
       step.selectOptions.forEach((opt: any) => {
         const text = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.value);
         if (targetField) addValue(targetField, text);
-        addValue('Type', text);
+        if (targetField && /type/i.test(targetField)) addValue('Type', text);
       });
     }
 
@@ -345,15 +345,18 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
     }
   });
 
-  // 3. Domain defaults for common columns
-  const defaults: Record<string, string[]> = {
-    Type: ['Invoice', 'Bill', 'Statement', 'Credit Note', 'Receipt', 'Payment', 'Order'],
-    Status: ['Open', 'Pending', 'Paid', 'Overdue', 'Unpaid', 'Draft', 'Closed', 'Processing', 'Active'],
-    Priority: ['High', 'Normal', 'Low', 'Urgent'],
+  // 3. Sensible fallback defaults ONLY when column has no extracted values
+  const fallbackDefaults: Record<string, string[]> = {
+    Type: ['Invoice', 'Credit Memo'],
+    Status: ['Open', 'Pending', 'Paid', 'Closed'],
+    Priority: ['High', 'Normal', 'Low'],
   };
 
-  Object.entries(defaults).forEach(([col, defVals]) => {
-    defVals.forEach((val) => addValue(col, val));
+  Object.entries(fallbackDefaults).forEach(([col, defVals]) => {
+    // Only apply defaults if result has no values for this column
+    if (!result[col] || result[col].size === 0) {
+      defVals.forEach((val) => addValue(col, val));
+    }
   });
 
   const finalMap: Record<string, string[]> = {};
@@ -806,11 +809,11 @@ export function ExecutionPreflightModal({
         setFieldValuesMap((prev) => {
           const merged: Record<string, string[]> = { ...prev };
           Object.entries(nextValMap).forEach(([col, vals]) => {
-            if (!merged[col]) {
+            if (Array.isArray(vals) && vals.length > 0) {
+              // Real scanned values from the live page take precedence over defaults
+              merged[col] = vals.slice(0, 30);
+            } else if (!merged[col]) {
               merged[col] = vals;
-            } else {
-              const s = new Set([...merged[col], ...vals]);
-              merged[col] = Array.from(s).slice(0, 30);
             }
           });
           return merged;
