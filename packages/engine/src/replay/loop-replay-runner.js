@@ -1073,8 +1073,12 @@ class LoopReplayRunner {
           await new Promise(r => setTimeout(r, 400));
         }
 
-        // Natural pacing delay after setup steps and deduplicate any duplicate floating windows
-        await new Promise(r => setTimeout(r, 400));
+        // Natural pacing delay after setup steps and allow asynchronous frames/AJAX to settle
+        await new Promise(r => setTimeout(r, 1500));
+        if (this.replayEngine) {
+          await this.replayEngine._waitForLoadingMasks(25000).catch(() => {});
+          await this.replayEngine._waitForExtAjaxIdle(25000).catch(() => {});
+        }
         if (typeof this.replayEngine?.interruptionHandler?.closeDuplicateWindows === 'function') {
           await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
         }

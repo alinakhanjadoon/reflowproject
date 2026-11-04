@@ -290,8 +290,22 @@ class ItemDiscovery {
         // Table rows (<tr> / [role="row"]) contain table cells (columns), NOT repeating records.
         const ancTag = ancestor.tagName.toLowerCase();
         const ancRole = (ancestor.getAttribute('role') || '').toLowerCase();
-        if (ancTag === 'tr' || ancRole === 'row' || ancestor.classList?.contains('x-grid-row')) {
+        if (
+          ancTag === 'tr' ||
+          ancRole === 'row' ||
+          ancestor.classList?.contains('x-grid-row') ||
+          ancestor.classList?.contains('x-grid-item') ||
+          (ancTag === 'tbody' && ancestor.parentElement?.classList?.contains('x-grid-item'))
+        ) {
           continue;
+        }
+
+        // If an ancestor has only 1 child and is an internal table/tbody inside a virtualized grid container, skip it
+        if (ancestor.children.length === 1 && (ancTag === 'tbody' || ancTag === 'table')) {
+          const parentGrid = ancestor.closest?.('.x-grid-item-container, .x-grid-view, [role="grid"], .data-table, .grid-container');
+          if (parentGrid) {
+            continue;
+          }
         }
 
         const children = Array.from(ancestor.children).filter(visible);
@@ -306,7 +320,13 @@ class ItemDiscovery {
         const itemRole = (itemForRecorded.getAttribute('role') || '').toLowerCase();
 
         // Table cells (<td> / <th> / [role="gridcell"]) are columns within a row, NOT collection items.
-        if (itemTagLower === 'td' || itemTagLower === 'th' || itemRole === 'gridcell' || itemForRecorded.classList?.contains('x-grid-cell')) {
+        if (
+          itemTagLower === 'td' ||
+          itemTagLower === 'th' ||
+          itemRole === 'gridcell' ||
+          itemForRecorded.classList?.contains('x-grid-cell') ||
+          (itemTagLower === 'tbody' && itemForRecorded.parentElement?.classList?.contains('x-grid-item'))
+        ) {
           continue;
         }
 
@@ -462,9 +482,11 @@ class ItemDiscovery {
         // Bonus for recognized repeated item structures (table rows, list items)
         let bonus = 0;
         if ((ancestorTagLower === 'tbody' || ancestorTagLower === 'table') && itemTagLower === 'tr') {
-          bonus += 0.2;
+          if (effectiveMatching.length >= 2) bonus += 0.2;
         } else if ((ancestorTagLower === 'ul' || ancestorTagLower === 'ol') && itemTagLower === 'li') {
-          bonus += 0.2;
+          if (effectiveMatching.length >= 2) bonus += 0.2;
+        } else if (itemTagLower === 'table' && (itemForRecorded.classList?.contains('x-grid-item') || ancestor.classList?.contains('x-grid-item-container'))) {
+          if (effectiveMatching.length >= 2) bonus += 0.2;
         }
 
         const score = Math.min(
@@ -475,7 +497,13 @@ class ItemDiscovery {
           bonus
         );
 
-        const collType = (itemTagLower === 'tr' || itemRole === 'row' || (rawHeaderLayout.length > 0 && rawHeaderLayout.length === children.length))
+        const isTableRowItem = itemTagLower === 'tr' ||
+          itemRole === 'row' ||
+          itemForRecorded.classList?.contains('x-grid-item') ||
+          itemForRecorded.classList?.contains('x-grid-row') ||
+          (rawHeaderLayout.length > 0 && rawHeaderLayout.length === children.length);
+
+        const collType = isTableRowItem
           ? 'table-row'
           : (itemTagLower === 'mat-option' || itemRole === 'option' || itemTagLower === 'option'
             ? 'dropdown-option'
@@ -721,7 +749,19 @@ class ItemDiscovery {
         });
       }
 
-      candidates.sort((a, b) => b.score - a.score);
+      candidates.sort((a, b) => {
+        const scoreDiff = b.score - a.score;
+        if (Math.abs(scoreDiff) > 0.15) {
+          return scoreDiff;
+        }
+        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
+          return b.itemCount > 1 ? 1 : -1;
+        }
+        if (b.itemCount !== a.itemCount) {
+          return b.itemCount - a.itemCount;
+        }
+        return scoreDiff;
+      });
 
       const best = candidates[0];
       if (!best || best.score < minScore) {
@@ -1021,7 +1061,19 @@ class ItemDiscovery {
     if (!Array.isArray(candidates) || candidates.length === 0) return null;
     return candidates
       .filter(c => c && typeof c.score === 'number' && !this.isNavigationCandidate(c))
-      .sort((a, b) => b.score - a.score)[0] || null;
+      .sort((a, b) => {
+        const scoreDiff = b.score - a.score;
+        if (Math.abs(scoreDiff) > 0.15) {
+          return scoreDiff;
+        }
+        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
+          return b.itemCount > 1 ? 1 : -1;
+        }
+        if (b.itemCount !== a.itemCount) {
+          return b.itemCount - a.itemCount;
+        }
+        return scoreDiff;
+      })[0] || null;
   }
 }
 

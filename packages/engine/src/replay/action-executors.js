@@ -600,12 +600,18 @@ async function executeClick(elementHandle, action, options = {}) {
         if (PtrEvt) {
           try { el.dispatchEvent(new PtrEvt('pointerup', { bubbles: true, cancelable: true })); } catch {}
         }
+        let dispatchedClick = false;
         if (MouseEvt) {
           try { el.dispatchEvent(new MouseEvt('mouseup', { bubbles: true, cancelable: true, view: win })); } catch {}
-          try { el.dispatchEvent(new MouseEvt('click', { bubbles: true, cancelable: true, view: win })); } catch {}
+          try {
+            el.dispatchEvent(new MouseEvt('click', { bubbles: true, cancelable: true, view: win }));
+            dispatchedClick = true;
+          } catch {}
         }
 
-        try { el.click?.(); } catch {}
+        if (!dispatchedClick) {
+          try { el.click?.(); } catch {}
+        }
       });
       clicked = true;
     } catch (fallbackErr) {

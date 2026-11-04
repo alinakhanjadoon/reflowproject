@@ -79,6 +79,14 @@ function runItemDiscoveryTests() {
   assert.strictEqual(sorted[1].collectionType, 'list-item');
   console.log('  ✅ Multi-collection ranking passed\n');
 
+  console.log('🔹 Test 7: Prioritize multi-record grid collections over 1-record sub-table / tbody wrapper');
+  const singleRowTbody = { score: 1.0, itemCount: 1, ancestorTag: 'tbody', itemTag: 'tr' };
+  const virtualGridContainer = { score: 1.0, itemCount: 15, ancestorTag: 'div', itemTag: 'table' };
+  const bestGridCandidate = ItemDiscovery.selectBestCandidate([singleRowTbody, virtualGridContainer]);
+  assert.strictEqual(bestGridCandidate.itemCount, 15, 'Multi-record grid container must beat 1-record sub-tbody wrapper when scores are equal');
+  assert.strictEqual(bestGridCandidate.ancestorTag, 'div');
+  console.log('  ✅ Multi-record grid candidate priority passed\n');
+
   console.log('🎉 ALL ITEM DISCOVERY TESTS PASSED SUCCESSFULLY!\n');
 }
 
