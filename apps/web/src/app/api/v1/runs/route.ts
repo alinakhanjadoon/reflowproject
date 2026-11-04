@@ -170,9 +170,24 @@ export async function POST(request: NextRequest) {
     // Determine item filter
     const hasExplicitItemFilter = body.itemFilter !== undefined || body.item_filter !== undefined;
     const explicitItemFilter = body.itemFilter !== undefined ? body.itemFilter : body.item_filter;
-    const itemFilter = hasExplicitItemFilter
+    let itemFilter = hasExplicitItemFilter
       ? explicitItemFilter
       : (currentDef.itemFilter !== undefined ? currentDef.itemFilter : null);
+
+    if (body.nestedLoop || body.newOnly !== undefined) {
+      if (typeof itemFilter === 'object' && itemFilter !== null) {
+        itemFilter = {
+          ...itemFilter,
+          ...(body.nestedLoop ? { nestedLoop: body.nestedLoop } : {}),
+          ...(body.newOnly !== undefined ? { newOnly: body.newOnly } : {})
+        };
+      } else {
+        itemFilter = {
+          ...(body.nestedLoop ? { nestedLoop: body.nestedLoop } : {}),
+          ...(body.newOnly !== undefined ? { newOnly: body.newOnly } : {})
+        };
+      }
+    }
 
     // The execution configuration is stored on the run row below. It is
     // deliberately NOT written back to the workflow: a one-off run used to

@@ -635,6 +635,187 @@ class LoopDetector {
       teardownSteps
     };
   }
+
+  /**
+   * Derives a structured two-level (nested) loop configuration:
+   * Level 1: Outer (Company / Department / Customer) anchor and range
+   * Level 2: Inner (Record / Invoice / Order) anchor and range
+   *
+   * @param {object} definition - Workflow definition or run config
+   * @param {Array<object>} stepsInput - Workflow steps sequence
+   * @returns {object|null} Standardized nested loop configuration or null if not a two-level loop
+   */
+  static deriveNestedLoopConfig(definition = {}, stepsInput) {
+    const def = (definition && typeof definition === 'object') ? definition : {};
+    const metadata = (def.metadata && typeof def.metadata === 'object') ? def.metadata : {};
+    const settings = (def.settings && typeof def.settings === 'object') ? def.settings : {};
+    const steps = Array.isArray(stepsInput)
+      ? stepsInput
+      : (Array.isArray(def.steps) ? def.steps : (Array.isArray(def.actions) ? def.actions : []));
+    const stepCount = steps.length;
+
+    // 1. Check for explicit nestedLoop configuration in various standard containers
+    const raw = def.nestedLoop ||
+      def.twoLevelLoop ||
+      def.nested_loop ||
+      def.two_level_loop ||
+      (def.loop && (def.loop.nested || def.loop.two_level || (def.loop.mode === 'two_level' ? def.loop : null))) ||
+      (metadata.loop && (metadata.loop.nested || (metadata.loop.mode === 'two_level' ? metadata.loop : null))) ||
+      metadata.nestedLoop ||
+      metadata.twoLevelLoop ||
+      settings.nestedLoop;
+
+    if (!raw || raw.enabled === false) {
+      // 2. Also check if definition explicitly flags two anchors
+      const outerAnchor = Number.isInteger(def.outerAnchorStepIndex) ? def.outerAnchorStepIndex : (Number.isInteger(def.companyAnchorStepIndex) ? def.companyAnchorStepIndex : null);
+      const innerAnchor = Number.isInteger(def.innerAnchorStepIndex) ? def.innerAnchorStepIndex : (Number.isInteger(def.recordAnchorStepIndex) ? def.recordAnchorStepIndex : null);
+
+      if (outerAnchor === null || innerAnchor === null || outerAnchor === innerAnchor) {
+        return null;
+      }
+
+      // Build structured nested loop from flat anchors
+      const outerStart = Number.isInteger(def.outerStartStepIndex) ? def.outerStartStepIndex : outerAnchor;
+      const outerEnd = Number.isInteger(def.outerEndStepIndex) ? def.outerEndStepIndex : (stepCount > 0 ? stepCount - 1 : 0);
+      const innerStart = Number.isInteger(def.innerStartStepIndex) ? def.innerStartStepIndex : innerAnchor;
+      const innerEnd = Number.isInteger(def.innerEndStepIndex) ? def.innerEndStepIndex : Math.max(innerStart, outerEnd - 1);
+
+      return {
+        enabled: true,
+        mode: 'two_level',
+        outer: {
+          name: def.outerName || 'company',
+          anchorStepIndex: outerAnchor,
+          startStepIndex: outerStart,
+          endStepIndex: outerEnd,
+          maxItems: Number.isInteger(def.outerMaxItems) && def.outerMaxItems > 0 ? def.outerMaxItems : null,
+          filter: def.outerFilter || null
+        },
+        inner: {
+          name: def.innerName || 'record',
+          anchorStepIndex: innerAnchor,
+          startStepIndex: innerStart,
+          endStepIndex: innerEnd,
+          maxItems: Number.isInteger(def.innerMaxItems) && def.innerMaxItems > 0 ? def.innerMaxItems : (Number.isInteger(def.loopLimit) ? def.loopLimit : null),
+          filter: def.innerFilter || def.itemFilter || def.rowFilter || null
+        }
+      };
+    }
+
+    const outer = raw.outer || {};
+    const inner = raw.inner || {};
+
+    const outerAnchor = Number.isInteger(outer.anchorStepIndex)
+      ? outer.anchorStepIndex
+      : (Number.isInteger(outer.loopStepIndex) ? outer.loopStepIndex : 0);
+    const outerStart = Number.isInteger(outer.startStepIndex) ? outer.startStepIndex : outerAnchor;
+    const outerEnd = Number.isInteger(outer.endStepIndex) ? outer.endStepIndex : (stepCount > 0 ? stepCount - 1 : 0);
+
+    const innerAnchor = Number.isInteger(inner.anchorStepIndex)
+      ? inner.anchorStepIndex
+      : (Number.isInteger(inner.loopStepIndex) ? inner.loopStepIndex : Math.min(outerAnchor + 2, Math.max(0, stepCount - 1)));
+    const innerStart = Number.isInteger(inner.startStepIndex) ? inner.startStepIndex : innerAnchor;
+    const innerEnd = Number.isInteger(inner.endStepIndex) ? inner.endStepIndex : Math.max(innerStart, outerEnd - 1);
+
+    return {
+      enabled: raw.enabled !== false,
+      mode: 'two_level',
+      outer: {
+        name: outer.name || 'company',
+        anchorStepIndex: outerAnchor,
+        startStepIndex: outerStart,
+        endStepIndex: outerEnd,
+        maxItems: Number.isInteger(outer.maxItems) && outer.maxItems > 0 ? outer.maxItems : null,
+        filter: outer.filter || null
+      },
+      inner: {
+        name: inner.name || 'record',
+        anchorStepIndex: innerAnchor,
+        startStepIndex: innerStart,
+        endStepIndex: innerEnd,
+        maxItems: Number.isInteger(inner.maxItems) && inner.maxItems > 0 ? inner.maxItems : (Number.isInteger(raw.maxItems) ? raw.maxItems : null),
+        filter: inner.filter || raw.filter || def.itemFilter || def.rowFilter || null
+      }
+    };
+  }
+
+  /**
+   * Validates a two-level (nested) loop configuration against workflow bounds.
+   */
+  static validateNestedLoopConfig(config, stepCount = 0) {
+    if (!config || !config.enabled) {
+      return { valid: false, error: 'Nested loop configuration is disabled or missing' };
+    }
+    const { outer, inner } = config;
+    if (!outer || typeof outer !== 'object' || !inner || typeof inner !== 'object') {
+      return { valid: false, error: 'Both outer and inner loop levels must be defined objects' };
+    }
+    if (stepCount <= 0) {
+      return { valid: false, error: 'Workflow contains no steps to loop over' };
+    }
+
+    if (outer.startStepIndex < 0 || outer.startStepIndex >= stepCount) {
+      return { valid: false, error: `Outer start index (${outer.startStepIndex}) is out of bounds (0..${stepCount - 1})` };
+    }
+    if (outer.anchorStepIndex < outer.startStepIndex || outer.anchorStepIndex > outer.endStepIndex) {
+      return { valid: false, error: `Outer anchor index (${outer.anchorStepIndex}) must be within outer range [${outer.startStepIndex}..${outer.endStepIndex}]` };
+    }
+    if (outer.endStepIndex < outer.startStepIndex || outer.endStepIndex >= stepCount) {
+      return { valid: false, error: `Outer end index (${outer.endStepIndex}) must be >= outer start (${outer.startStepIndex}) and < step count (${stepCount})` };
+    }
+
+    if (inner.startStepIndex < outer.startStepIndex || inner.endStepIndex > outer.endStepIndex) {
+      return { valid: false, error: `Inner loop range [${inner.startStepIndex}..${inner.endStepIndex}] must be enclosed within outer loop range [${outer.startStepIndex}..${outer.endStepIndex}]` };
+    }
+    if (inner.anchorStepIndex < inner.startStepIndex || inner.anchorStepIndex > inner.endStepIndex) {
+      return { valid: false, error: `Inner anchor index (${inner.anchorStepIndex}) must be within inner range [${inner.startStepIndex}..${inner.endStepIndex}]` };
+    }
+
+    return { valid: true, error: null };
+  }
+
+  /**
+   * Partitions workflow steps into 5 discrete phases for controlled two-level iteration:
+   * 1. initialSetupSteps: steps executed ONCE before any company/outer iteration (e.g. Login)
+   * 2. outerPreSteps: steps to select current company and navigate to its record page
+   * 3. innerLoopSteps: repeated steps executed per record/invoice for the current company
+   * 4. outerPostSteps: steps to exit record view and return to company selection context
+   * 5. finalTeardownSteps: steps executed ONCE after all companies complete (e.g. Logout)
+   */
+  static partitionNestedWorkflow(steps, nestedConfig) {
+    if (!Array.isArray(steps) || !nestedConfig || !nestedConfig.enabled) {
+      return {
+        initialSetupSteps: steps || [],
+        outerPreSteps: [],
+        innerLoopSteps: [],
+        outerPostSteps: [],
+        finalTeardownSteps: [],
+        outerAnchorOffset: 0,
+        innerAnchorOffset: 0
+      };
+    }
+
+    const { outer, inner } = nestedConfig;
+
+    const initialSetupSteps = steps.slice(0, outer.startStepIndex);
+    const outerPreSteps = steps.slice(outer.startStepIndex, inner.startStepIndex);
+    const innerLoopSteps = steps.slice(inner.startStepIndex, inner.endStepIndex + 1);
+    const outerPostSteps = steps.slice(inner.endStepIndex + 1, outer.endStepIndex + 1);
+    const finalTeardownSteps = steps.slice(outer.endStepIndex + 1);
+
+    const outerAnchorOffset = outer.anchorStepIndex - outer.startStepIndex;
+    const innerAnchorOffset = inner.anchorStepIndex - inner.startStepIndex;
+
+    return {
+      initialSetupSteps,
+      outerPreSteps,
+      innerLoopSteps,
+      outerPostSteps,
+      finalTeardownSteps,
+      outerAnchorOffset,
+      innerAnchorOffset
+    };
+  }
 }
 
 module.exports = LoopDetector;

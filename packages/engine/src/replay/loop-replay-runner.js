@@ -80,6 +80,10 @@ class LoopReplayRunner {
     this.loopLimit = validatedLimit;
     this.loopLimitError = limitError;
 
+    // Two-Level / Nested Loop Configuration (Controlled Two-Level Iteration)
+    this.nestedLoop = options.nestedLoop || options.twoLevelLoop || null;
+    this.newOnly = options.newOnly === true || options.new_only === true;
+
     // Unified Loop Configuration
     this.loopConfig = LoopDetector.deriveLoopConfig(
       options.loop ? { loop: options.loop } : (this.workflow || options)
@@ -421,6 +425,15 @@ class LoopReplayRunner {
 
   async configureDownloadInterception(page) {
     return this.artifactDownloadManager.configureDownloadInterception(page);
+  }
+
+  async _settlePageAsync(page, timeoutMs = 25000) {
+    if (this.replayEngine && typeof this.replayEngine._waitForLoadingMasks === 'function') {
+      await this.replayEngine._waitForLoadingMasks(timeoutMs).catch(() => {});
+    }
+    if (this.replayEngine && typeof this.replayEngine._waitForExtAjaxIdle === 'function') {
+      await this.replayEngine._waitForExtAjaxIdle(timeoutMs).catch(() => {});
+    }
   }
 
   /**
@@ -829,6 +842,463 @@ class LoopReplayRunner {
   }
 
   /**
+   * Checks whether a composite record (e.g. "company_101/SI-184914") has already been
+   * successfully processed and downloaded to prevent redundant processing under NEW_ONLY mode.
+   *
+   * @param {string} compositeKey - Composite identity (e.g. "companyId/invoiceNumber")
+   * @param {string} outerId - Company identifier
+   * @param {string} innerId - Record / Invoice identifier
+   * @param {object} manifest - Active execution manifest
+   * @returns {boolean}
+   */
+  checkCompositeAlreadyProcessed(compositeKey, outerId, innerId, manifest) {
+    if (!compositeKey) return false;
+
+    // 1. Check in-memory execution results
+    if (manifest && Array.isArray(manifest.results)) {
+      if (manifest.results.some(r => r && (r.compositeKey === compositeKey || (r.companyId === outerId && r.recordId === innerId)) && r.status === 'SUCCESS')) {
+        return true;
+      }
+    }
+
+    // 2. Check workflow download artifacts manifest
+    if (this.artifactDownloadManager?.manifest?.files) {
+      if (this.artifactDownloadManager.manifest.files.some(f => f && (f.compositeKey === compositeKey || (f.itemKey && f.itemKey.includes(compositeKey))))) {
+        return true;
+      }
+    }
+
+    // 3. Check underlying DownloadManager if attached
+    if (this.downloadManager?.checkIfAlreadyDownloaded) {
+      const res = this.downloadManager.checkIfAlreadyDownloaded(compositeKey, innerId, { companyId: outerId });
+      if (res?.isDuplicate) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Executes a Controlled Two-Level Iteration workflow:
+   * Level 1: Outer collection (Company / Department / Customer)
+   * Level 2: Inner collection (Record / Invoice / Order)
+   *
+   * Exact execution flow:
+   * 1. Initial setup steps (e.g. Login) run ONCE
+   * 2. Outer collection (Companies) is discovered
+   * 3. For Company 101:
+   *    a. Select Company 101 (item-relative action)
+   *    b. Execute outer pre-steps (navigate to Invoices page)
+   *    c. Discover Invoices belonging to Company 101 freshly
+   *    d. Process all matching invoices (A, B, C...)
+   *    e. Exit inner loop, execute outer post-steps (return to company selection context)
+   * 4. For Company 102:
+   *    a. Select Company 102
+   *    b. Execute outer pre-steps
+   *    c. Discover Invoices belonging to Company 102 freshly
+   *    d. Process all matching invoices (D, E...)
+   *    e. Exit inner loop, return to company selection context
+   * 5. Repeat for all remaining companies
+   * 6. Final teardown steps run ONCE at completion
+   *
+   * @param {object} workflow - Stored workflow object with steps array
+   * @param {object} nestedConfig - Standardized nested loop configuration
+   * @param {function} onProgress - Progress callback for live updates
+   */
+  async executeNestedLoop(workflow, nestedConfig, onProgress = () => {}) {
+    const steps = workflow.steps ||
+      (workflow.workflow_definition && (workflow.workflow_definition.steps || workflow.workflow_definition.actions)) ||
+      (workflow.recordingData && workflow.recordingData.actions) ||
+      workflow.actions ||
+      [];
+
+    const partition = LoopDetector.partitionNestedWorkflow(steps, nestedConfig);
+
+    const manifest = {
+      runId: this.runId,
+      workflowId: workflow.id,
+      mode: 'TWO_LEVEL_LOOP',
+      startTime: new Date().toISOString(),
+      status: 'RUNNING',
+      nestedConfig,
+      outer: {
+        name: nestedConfig.outer.name || 'company',
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        items: []
+      },
+      inner: {
+        name: nestedConfig.inner.name || 'record',
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        skippedFilter: 0,
+        skippedDuplicate: 0,
+        downloadedFiles: []
+      },
+      results: [],
+      downloadedFiles: []
+    };
+    this.manifest = manifest;
+
+    onProgress({ status: 'STARTING', manifest, mode: 'TWO_LEVEL_LOOP' });
+
+    if (this.replayEngine) {
+      this.replayEngine.isPaused = false;
+      this.replayEngine.isAborted = false;
+    }
+    this.replayEngine.recording = workflow.recordingData || {
+      actions: steps,
+      targetUrl: workflow.targetUrl || workflow.startUrl,
+      metadata: { startUrl: workflow.targetUrl || workflow.startUrl }
+    };
+
+    const browser = await this.replayEngine.connect();
+    if (this.replayEngine.tabManager) {
+      await this.replayEngine.tabManager.cleanupAuxiliaryTabs().catch(() => {});
+    }
+    const page = this.replayEngine.tabManager?.getPrimaryPage() || this.replayEngine.page || (await browser.pages())[0];
+    this.replayEngine.page = page;
+
+    this.replayEngine.secretResolver = this.secretResolver || (async (secretId) => `{{secret:${secretId}}}`);
+    await this.configureDownloadInterception(page);
+    await this.navigateToWorkflowTarget(page, workflow);
+    await this.replayEngine._ensureSelectorResolverInFrame(page.mainFrame());
+
+    try {
+      // Phase 1: Initial Setup Steps (Login) executed ONCE
+      if (partition.initialSetupSteps.length > 0) {
+        logger.info(`[Two-Level Loop] [SETUP] Executing ${partition.initialSetupSteps.length} initial setup step(s) once...`);
+        const setupLoginSeq = detectLoginSequence(partition.initialSetupSteps);
+        const isSessionAuth = setupLoginSeq.hasLoginSequence
+          ? await isSessionAuthenticated(page, setupLoginSeq)
+          : false;
+
+        for (let i = 0; i < partition.initialSetupSteps.length; i++) {
+          if (this.isAborted) throw new Error('Execution stopped by user');
+          const step = partition.initialSetupSteps[i];
+          if (isSessionAuth && i <= setupLoginSeq.endIndex) {
+            logger.info(`[Two-Level Loop] [SETUP] Skipping login step #${i + 1} - session already authenticated.`);
+            continue;
+          }
+          if (i > 0 && step.timeDeltaMs && step.timeDeltaMs > 0) {
+            const paceDelay = Math.min(step.timeDeltaMs, 10000);
+            if (paceDelay > 600) await new Promise(r => setTimeout(r, paceDelay));
+          }
+          logger.info(`[Two-Level Loop] [SETUP] Step #${i + 1}/${partition.initialSetupSteps.length}: ${step.name || step.elementName || step.type || 'Action'}`);
+          await this.replayEngine.executeAction(step, i);
+        }
+
+        await new Promise(r => setTimeout(r, 1500));
+        await this._settlePageAsync(page, 25000);
+        if (typeof this.replayEngine.interruptionHandler?.closeDuplicateWindows === 'function') {
+          await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
+        }
+      }
+
+      // Phase 2: Outer Collection Discovery (Companies)
+      const outerAnchorStep = partition.outerPreSteps[partition.outerAnchorOffset];
+      if (!outerAnchorStep) {
+        throw new Error(`Outer anchor action not found at step #${nestedConfig.outer.anchorStepIndex + 1}`);
+      }
+
+      logger.info(`[Two-Level Loop] Discovering outer collection (${nestedConfig.outer.name || 'company'}) targeting anchor step #${nestedConfig.outer.anchorStepIndex + 1}...`);
+      const outerDiscovery = await ItemDiscovery.discover(page, outerAnchorStep.target || outerAnchorStep.fingerprint, {
+        minItems: 1,
+        minScore: 0.45
+      });
+
+      if (!outerDiscovery || !outerDiscovery.success || outerDiscovery.itemCount === 0) {
+        throw new Error(`Outer collection discovery failed for ${nestedConfig.outer.name || 'company'} anchor step #${nestedConfig.outer.anchorStepIndex + 1}: ${outerDiscovery?.reason || 'No collection items found'}`);
+      }
+
+      let outerItems = Array.isArray(outerDiscovery.items) ? outerDiscovery.items : [];
+      if (nestedConfig.outer.filter) {
+        const evalOuter = await this.detectAndFilterItems(page, outerDiscovery, false, nestedConfig.outer.filter);
+        outerItems = evalOuter.filter(it => it.matches);
+      }
+      if (nestedConfig.outer.maxItems && nestedConfig.outer.maxItems > 0) {
+        outerItems = outerItems.slice(0, nestedConfig.outer.maxItems);
+      }
+
+      manifest.outer.total = outerItems.length;
+      manifest.itemsTotal = outerItems.length;
+      logger.info(`[Two-Level Loop] Discovered ${outerItems.length} outer item(s) to process.`);
+
+      // Phase 3: Controlled Outer Loop Execution (Company by Company)
+      for (let c = 0; c < outerItems.length; c++) {
+        if (this.isAborted) {
+          manifest.status = 'STOPPED';
+          break;
+        }
+
+        const currentOuter = outerItems[c];
+        const outerIdx = currentOuter.index !== undefined ? currentOuter.index : c;
+        const outerFields = currentOuter.fields || {};
+        const outerId = outerFields['Company ID'] || outerFields['ID'] ||
+          (currentOuter.text && currentOuter.text.match(/\b\d{3,6}\b/)?.[0]) ||
+          (currentOuter.text ? currentOuter.text.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30) : `company_${c + 1}`);
+        const outerLabel = currentOuter.text || `Company #${c + 1}`;
+
+        const outerRecord = {
+          index: c,
+          domIndex: outerIdx,
+          id: outerId,
+          label: outerLabel,
+          status: 'IN_PROGRESS',
+          startedAt: new Date().toISOString(),
+          innerItemsTotal: 0,
+          innerItemsSucceeded: 0,
+          innerItemsFailed: 0,
+          results: []
+        };
+        manifest.outer.items.push(outerRecord);
+
+        logger.info(`\n================================================================================`);
+        logger.info(`[Two-Level Loop] >>> [${c + 1}/${outerItems.length}] Processing ${nestedConfig.outer.name || 'Company'}: "${outerLabel}" (ID: ${outerId}) <<<`);
+        logger.info(`================================================================================\n`);
+        onProgress({ status: 'PROCESSING_OUTER', outerIndex: c, outerTotal: outerItems.length, outerRecord, manifest });
+
+        // 3a. Select current company
+        const outerItemHandle = await ItemDiscovery.getItemHandle(page, outerDiscovery, outerIdx);
+        const outerItemEl = outerItemHandle ? (outerItemHandle.asElement ? outerItemHandle.asElement() : outerItemHandle) : null;
+        if (!outerItemEl) {
+          throw new Error(`Could not resolve DOM element for ${nestedConfig.outer.name} #${c + 1} ("${outerLabel}")`);
+        }
+
+        try {
+          logger.info(`[Two-Level Loop] Selecting ${nestedConfig.outer.name}: "${outerLabel}"`);
+          await this.replayEngine.executeActionWithinItem(
+            outerItemEl,
+            outerAnchorStep,
+            nestedConfig.outer.anchorStepIndex
+          );
+        } finally {
+          await outerItemEl.dispose().catch(() => {});
+        }
+
+        await new Promise(r => setTimeout(r, 1200));
+        await this._settlePageAsync(page, 25000);
+
+        // 3b. Execute outer pre-steps (navigate to records page, e.g. Step 3: Open Invoices)
+        for (let pIdx = partition.outerAnchorOffset + 1; pIdx < partition.outerPreSteps.length; pIdx++) {
+          if (this.isAborted) break;
+          const preStep = partition.outerPreSteps[pIdx];
+          const absStepIdx = nestedConfig.outer.startStepIndex + pIdx;
+          logger.info(`[Two-Level Loop] Navigation step #${absStepIdx + 1}: ${preStep.name || preStep.elementName || preStep.type || 'Action'}`);
+          await this.replayEngine.executeAction(preStep, absStepIdx);
+          await new Promise(r => setTimeout(r, 1200));
+          await this._settlePageAsync(page, 25000);
+        }
+
+        if (typeof this.replayEngine.interruptionHandler?.closeDuplicateWindows === 'function') {
+          await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
+        }
+
+        // 3c. Fresh discovery of Inner Collection for THIS company
+        const innerAnchorStep = partition.innerLoopSteps[partition.innerAnchorOffset];
+        if (!innerAnchorStep) {
+          throw new Error(`Inner anchor action not found at step #${nestedConfig.inner.anchorStepIndex + 1}`);
+        }
+
+        logger.info(`[Two-Level Loop] Discovering inner collection (${nestedConfig.inner.name || 'records'}) for ${outerLabel}...`);
+        const innerDiscovery = await ItemDiscovery.discover(page, innerAnchorStep.target || innerAnchorStep.fingerprint, {
+          minItems: 1,
+          minScore: 0.45
+        }).catch(err => ({ success: false, reason: err.message, itemCount: 0 }));
+
+        if (!innerDiscovery || !innerDiscovery.success || innerDiscovery.itemCount === 0) {
+          logger.info(`[Two-Level Loop] No records found for ${outerLabel} (0 records). Moving to return step for next company.`);
+        } else {
+          logger.info(`[Two-Level Loop] Discovered ${innerDiscovery.itemCount} record(s) for ${outerLabel}.`);
+          outerRecord.innerItemsTotal = innerDiscovery.itemCount;
+          manifest.inner.total += innerDiscovery.itemCount;
+
+          // Filter inner items (e.g. Type = Invoice)
+          const effectiveInnerFilter = nestedConfig.inner.filter || this.itemFilter || this.rowFilter || null;
+          const evaluatedInner = await this.detectAndFilterItems(page, innerDiscovery, false, effectiveInnerFilter);
+          const matchingInner = evaluatedInner.filter(it => it.matches);
+          const skippedInner = evaluatedInner.filter(it => !it.matches);
+
+          logger.info(`[Two-Level Loop] Filter results: ${matchingInner.length} matching record(s), ${skippedInner.length} skipped.`);
+          manifest.inner.skippedFilter += skippedInner.length;
+
+          for (const sk of skippedInner) {
+            outerRecord.results.push({
+              index: sk.index,
+              status: 'SKIPPED_FILTER',
+              label: sk.itemIdentifier.itemLabel,
+              reason: sk.reason
+            });
+          }
+
+          // Generalized inner loop actions
+          const innerCollection = innerDiscovery.collection || { itemTag: 'tr', collectionType: 'table-row' };
+          if (!innerCollection.itemTag) innerCollection.itemTag = 'tr';
+          const generalizedInnerActions = ActionGeneralizer.generalizeActions(
+            partition.innerLoopSteps,
+            innerCollection,
+            partition.innerAnchorOffset
+          );
+
+          // Process each matching record for this company
+          const maxInner = (nestedConfig.inner.maxItems && nestedConfig.inner.maxItems > 0)
+            ? Math.min(matchingInner.length, nestedConfig.inner.maxItems)
+            : matchingInner.length;
+
+          for (let m = 0; m < maxInner; m++) {
+            if (this.isAborted) break;
+            const targetInner = matchingInner[m];
+            const innerIdx = targetInner.index;
+            const innerId = targetInner.itemIdentifier.businessId || targetInner.itemIdentifier.invoiceNumber || targetInner.itemIdentifier.itemKey;
+            const innerLabel = targetInner.itemIdentifier.itemLabel;
+            const compositeKey = `${outerId}/${innerId}`;
+
+            logger.info(`\n[Two-Level Loop] --- [${c + 1}.${m + 1}] Processing ${nestedConfig.inner.name}: "${innerLabel}" (${compositeKey}) ---`);
+
+            // NEW_ONLY / Duplicate check
+            const isNewOnly = Boolean(this.newOnly || this.options?.newOnly || workflow?.newOnly);
+            if (isNewOnly) {
+              const isDuplicate = this.checkCompositeAlreadyProcessed(compositeKey, outerId, innerId, manifest);
+              if (isDuplicate) {
+                logger.info(`[Two-Level Loop] 🛑 Skipping "${compositeKey}" (already processed in previous execution)`);
+                outerRecord.results.push({
+                  index: innerIdx,
+                  compositeKey,
+                  status: 'SKIPPED_DUPLICATE',
+                  reason: 'Already processed (NEW_ONLY)',
+                  label: innerLabel
+                });
+                manifest.inner.skippedDuplicate++;
+                continue;
+              }
+            }
+
+            const innerItemResult = {
+              index: innerIdx,
+              compositeKey,
+              companyId: outerId,
+              recordId: innerId,
+              label: innerLabel,
+              status: 'PENDING',
+              downloadedFiles: [],
+              actions: []
+            };
+
+            // Execute inner item actions
+            try {
+              for (let actIdx = 0; actIdx < generalizedInnerActions.length; actIdx++) {
+                if (this.isAborted) break;
+                const act = generalizedInnerActions[actIdx];
+                const actType = act.type || act.action || 'CLICK';
+                const isDl = actType === 'CLICK' && ItemExecutionHandler.isDownloadPotentialAction(act, targetInner);
+                const beforeFiles = this.artifactDownloadManager?.snapshotDownloadedFiles() || { runFiles: [], osFiles: [] };
+
+                if (act.scope === 'item') {
+                  const itemHandle = await ItemDiscovery.getItemHandle(page, innerDiscovery, innerIdx);
+                  const itemEl = itemHandle ? (itemHandle.asElement ? itemHandle.asElement() : itemHandle) : null;
+                  if (!itemEl) throw new Error(`Could not resolve DOM handle for record #${m + 1} ("${innerLabel}")`);
+                  try {
+                    await this.replayEngine.executeActionWithinItem(itemEl, act, nestedConfig.inner.startStepIndex + actIdx);
+                  } finally {
+                    await itemEl.dispose().catch(() => {});
+                  }
+                } else {
+                  await this.replayEngine.executeAction(act, nestedConfig.inner.startStepIndex + actIdx);
+                }
+
+                // Download handling
+                if (isDl && this.artifactDownloadManager) {
+                  const dlWait = this.itemExecutionHandler?.downloadTimeoutMs || 15000;
+                  const dls = await this.artifactDownloadManager.waitForDownload(beforeFiles, dlWait);
+                  if (dls && dls.length > 0) {
+                    for (const dl of dls) {
+                      const companySubfolder = path.join(this.workflowDownloadsBaseDir || '', outerId);
+                      const organized = this.artifactDownloadManager.processAndStoreDownload(dl.path, compositeKey, innerLabel, {
+                        ...targetInner.fields,
+                        companyId: outerId,
+                        companyName: outerLabel
+                      }, companySubfolder);
+                      if (organized) {
+                        innerItemResult.downloadedFiles.push(organized);
+                        manifest.inner.downloadedFiles.push(organized);
+                        manifest.downloadedFiles.push(organized.filename || organized.targetFilename);
+                      }
+                    }
+                  }
+                }
+
+                await new Promise(r => setTimeout(r, 600));
+                await this._settlePageAsync(page, 15000);
+              }
+
+              innerItemResult.status = 'SUCCESS';
+              outerRecord.innerItemsSucceeded++;
+              manifest.inner.succeeded++;
+            } catch (recErr) {
+              logger.error(`[Two-Level Loop] Error processing record "${innerLabel}": ${recErr.message}`);
+              innerItemResult.status = 'FAILED';
+              innerItemResult.error = recErr.message;
+              outerRecord.innerItemsFailed++;
+              manifest.inner.failed++;
+            }
+
+            outerRecord.results.push(innerItemResult);
+            manifest.results.push(innerItemResult);
+          }
+        }
+
+        // 3d. Exit Inner Loop & Teardown / Return to Company Selection Context
+        if (partition.outerPostSteps.length > 0) {
+          logger.info(`[Two-Level Loop] Executing ${partition.outerPostSteps.length} outer return/post step(s) to prepare next company...`);
+          for (let postIdx = 0; postIdx < partition.outerPostSteps.length; postIdx++) {
+            if (this.isAborted) break;
+            const postStep = partition.outerPostSteps[postIdx];
+            const absStepIdx = (nestedConfig.inner.endStepIndex + 1) + postIdx;
+            logger.info(`[Two-Level Loop] Return step #${absStepIdx + 1}: ${postStep.name || postStep.elementName || postStep.type || 'Action'}`);
+            await this.replayEngine.executeAction(postStep, absStepIdx);
+            await new Promise(r => setTimeout(r, 1200));
+            await this._settlePageAsync(page, 25000);
+          }
+        }
+
+        if (typeof this.replayEngine.interruptionHandler?.closeDuplicateWindows === 'function') {
+          await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
+        }
+
+        outerRecord.status = outerRecord.innerItemsFailed > 0 ? 'PARTIAL' : 'SUCCESS';
+        outerRecord.completedAt = new Date().toISOString();
+        manifest.outer.succeeded++;
+        this._persistManifest(manifest);
+      }
+
+      // Phase 4: Final Teardown Steps executed ONCE after all companies complete
+      if (partition.finalTeardownSteps.length > 0) {
+        logger.info(`[Two-Level Loop] Executing ${partition.finalTeardownSteps.length} final teardown step(s)...`);
+        for (let t = 0; t < partition.finalTeardownSteps.length; t++) {
+          const tearStep = partition.finalTeardownSteps[t];
+          const absStepIdx = (nestedConfig.outer.endStepIndex + 1) + t;
+          await this.replayEngine.executeAction(tearStep, absStepIdx);
+        }
+      }
+
+      manifest.status = this.isAborted ? 'STOPPED' : 'COMPLETED';
+      manifest.completedAt = new Date().toISOString();
+      this._persistManifest(manifest);
+      onProgress({ status: manifest.status, manifest });
+      return { success: true, status: manifest.status, manifest };
+    } catch (err) {
+      logger.error(`[Two-Level Loop] Execution failed: ${err.message}`);
+      manifest.status = 'FAILED';
+      manifest.error = err.message;
+      manifest.completedAt = new Date().toISOString();
+      this._persistManifest(manifest);
+      onProgress({ status: 'FAILED', error: err.message, manifest });
+      return { success: false, status: 'FAILED', error: err.message, manifest };
+    }
+  }
+
+  /**
    * Execute a parameterized loop workflow
    * @param {object} workflow - Stored workflow object with steps array
    * @param {number} loopStepIndex - Index of the action to iterate over
@@ -958,6 +1428,23 @@ class LoopReplayRunner {
       if (workflow.loop) loopConfigInput.loop = workflow.loop;
       else if (this.loopConfig?.enabled) loopConfigInput.loop = this.loopConfig;
 
+      // Check for Controlled Two-Level Iteration (Company-level outer + Record-level inner)
+      const nestedConfig = LoopDetector.deriveNestedLoopConfig({
+        ...workflow,
+        ...(this.nestedLoop ? { nestedLoop: this.nestedLoop } : {}),
+        ...(this.options?.nestedLoop ? { nestedLoop: this.options.nestedLoop } : {}),
+      }, steps);
+
+      if (nestedConfig && nestedConfig.enabled) {
+        const nestedValidation = LoopDetector.validateNestedLoopConfig(nestedConfig, steps.length);
+        if (nestedValidation.valid) {
+          logger.info(`[Loop Runner] Initiating Controlled Two-Level Iteration: Level 1 (${nestedConfig.outer.name || 'company'}) + Level 2 (${nestedConfig.inner.name || 'record'})`);
+          return await this.executeNestedLoop(workflow, nestedConfig, onProgress);
+        } else {
+          logger.warn(`[Loop Runner] Nested loop configuration invalid (${nestedValidation.error}). Falling back to single-level loop.`);
+        }
+      }
+
       const loopConfig = LoopDetector.deriveLoopConfig(
         loopConfigInput,
         steps
@@ -1075,10 +1562,7 @@ class LoopReplayRunner {
 
         // Natural pacing delay after setup steps and allow asynchronous frames/AJAX to settle
         await new Promise(r => setTimeout(r, 1500));
-        if (this.replayEngine) {
-          await this.replayEngine._waitForLoadingMasks(25000).catch(() => {});
-          await this.replayEngine._waitForExtAjaxIdle(25000).catch(() => {});
-        }
+        await this._settlePageAsync(page, 25000);
         if (typeof this.replayEngine?.interruptionHandler?.closeDuplicateWindows === 'function') {
           await this.replayEngine.interruptionHandler.closeDuplicateWindows(page).catch(() => {});
         }

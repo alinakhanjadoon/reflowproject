@@ -237,8 +237,9 @@ class ItemDiscovery {
           cellEl.classList?.contains('x-selmodel-column') ||
           cellEl.classList?.contains('ant-table-selection-column') ||
           cellEl.classList?.contains('mat-column-select') ||
+          (cellEl.classList?.contains('x-grid-cell-first') && !(cellEl.innerText || cellEl.textContent || '').trim()) ||
           (typeof cellEl.querySelector === 'function' && cellEl.querySelector(
-            '.x-grid-row-checker, input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"], .mat-pseudo-checkbox'
+            '.x-grid-row-checker, .x-grid-checkcolumn, [class*="checker" i], [class*="checkbox" i], input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"], .mat-pseudo-checkbox'
           ))
         ) {
           return true;
@@ -431,8 +432,13 @@ class ItemDiscovery {
           itemForRecorded.closest('.x-grid, [role="grid"], .data-table, .grid-container');
         if (gridContainer && headerColumns.length === 0) {
           const headerCt = gridContainer.querySelector('.x-grid-header-ct, thead, .x-grid-header-row, [role="rowgroup"], .ag-header, .mat-header-row') || gridContainer;
-          let headerEls = Array.from(headerCt.querySelectorAll('.x-column-header-text, .x-column-header, th, [role="columnheader"], .dxgvHeader, .mat-header-cell, .ag-header-cell, .ant-table-thead th')).filter(visible);
-          rawHeaderLayout = headerEls.map(h => {
+          let headerEls = Array.from(headerCt.querySelectorAll('.x-column-header, th, [role="columnheader"], .dxgvHeader, .mat-header-cell, .ag-header-cell, .ant-table-thead th')).filter(visible);
+          if (headerEls.length === 0) {
+            headerEls = Array.from(headerCt.querySelectorAll('.x-column-header-text, .ag-header-cell-text, th')).filter(visible);
+          }
+          // Deduplicate nested header elements: keep only top-level header cell elements
+          const topHeaderEls = headerEls.filter(h => !headerEls.some(other => other !== h && other.contains(h)));
+          rawHeaderLayout = topHeaderEls.map(h => {
             const inner = h.querySelector?.('.x-column-header-text, .ag-header-cell-text') || h;
             return cleanCellText(inner.innerText || inner.textContent || inner.getAttribute('aria-label') || '');
           });
@@ -621,6 +627,15 @@ class ItemDiscovery {
                   }
                 }
               });
+
+              // Semantic self-healing for Document Type (Invoice vs Credit Memo vs Statement):
+              if (!fields['Type'] || fields['Type'] === itemText || /^(SI|INV|DR|TX|CM)-\d+/i.test(fields['Type'])) {
+                if (/\bcredit\s*memo\b/i.test(itemText)) fields['Type'] = 'Credit Memo';
+                else if (/\binvoice\b/i.test(itemText)) fields['Type'] = 'Invoice';
+                else if (/\bstatement\b/i.test(itemText)) fields['Type'] = 'Statement';
+                else if (/\bbill\b/i.test(itemText)) fields['Type'] = 'Bill';
+                else if (/\breceipt\b/i.test(itemText)) fields['Type'] = 'Receipt';
+              }
 
               // Universal status derivation if not in headers or empty
               if (!fields['Status'] || EXPANDER_GLYPH_REGEX.test(fields['Status'])) {

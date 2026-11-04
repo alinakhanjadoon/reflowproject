@@ -308,4 +308,28 @@ assert.strictEqual(compatScore.matchedTag, true, 'Button should be compatible wi
 assert.ok(compatScore.score >= 0.85, `Score should be >= 0.85, got ${compatScore.score}`);
 console.log(`  Passed: Button container vs inner leaf scored ${compatScore.score} >= 0.85!`);
 
+// Test 12: Strict rejection of conflicting button text (e.g. "Close" vs "Archive")
+console.log('Test 12: Strict rejection of conflicting action element text ("Close" vs "Archive")...');
+const closeFingerprint = {
+  tagName: 'SPAN',
+  id: 'button-1052-btnInnerEl',
+  role: 'button',
+  text: 'Close',
+  classes: ['x-btn-inner', 'x-btn-inner-default-small'],
+  attributes: {}
+};
+const archiveButtonElement = {
+  tagName: 'SPAN',
+  id: 'button-1055-btnInnerEl',
+  classList: ['x-btn-inner', 'x-btn-inner-default-small'],
+  textContent: 'Archive',
+  getAttribute: (attr) => attr === 'role' ? 'button' : null,
+  hasAttribute: (attr) => attr === 'role',
+  closest: (sel) => ({ tagName: 'A', classList: ['x-btn'] })
+};
+const mismatchScore = SelectorResolver.scoreFingerprint(archiveButtonElement, closeFingerprint);
+assert.strictEqual(mismatchScore.passed, false, 'Conflicting button text ("Archive" vs "Close") must NOT pass!');
+assert.ok(mismatchScore.score < 0.20, `Score must be heavily penalized (< 0.20), got ${mismatchScore.score}`);
+console.log(`  Passed: "Archive" scored ${mismatchScore.score} against "Close" fingerprint (passed=${mismatchScore.passed})!`);
+
 console.log('\nAll Selector Resolver unit tests passed successfully!\n');

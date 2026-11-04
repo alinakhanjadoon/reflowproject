@@ -155,6 +155,10 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     str = str.replace(/^(click|select|enter|type|open|download|view|press)\s+/i, '').trim();
     if (!str || str.length > 50) return;
     if (IGNORED_COLUMN_NAMES.test(str)) return;
+    // Exclude action buttons, input fields, interactive control names, and document ID tokens from table column list
+    if (/\b(button|link|input|field|element)\b/i.test(str) && !/^(Invoice|Payment|Customer|Company|Date)\s+Field$/i.test(str)) return;
+    if (/^(open selected|export a report|save it to the disk)/i.test(str)) return;
+    if (/^[A-Z]{2,4}-\d+/i.test(str)) return;
     fields.add(str);
   };
 
@@ -385,6 +389,18 @@ export function ExecutionPreflightModal({
   const [loopStepIndex, setLoopStepIndex] = useState<number>(0);
   const [autoDetectedIndex, setAutoDetectedIndex] = useState<number>(0);
 
+  // Two-level (nested) loop state: Company (Outer) -> Record/Invoice (Inner)
+  const [isTwoLevel, setIsTwoLevel] = useState<boolean>(false);
+  const [outerAnchorIndex, setOuterAnchorIndex] = useState<number>(0);
+  const [outerStartIndex, setOuterStartIndex] = useState<number>(0);
+  const [outerEndIndex, setOuterEndIndex] = useState<number>(0);
+  const [outerMaxItems, setOuterMaxItems] = useState<string>('');
+  const [innerAnchorIndex, setInnerAnchorIndex] = useState<number>(0);
+  const [innerStartIndex, setInnerStartIndex] = useState<number>(0);
+  const [innerEndIndex, setInnerEndIndex] = useState<number>(0);
+  const [innerMaxItems, setInnerMaxItems] = useState<string>('');
+  const [newOnly, setNewOnly] = useState<boolean>(false);
+
   // Discovered records preview state
   const [discoveredRecords, setDiscoveredRecords] = useState<Array<any>>([]);
   const [discoveredCollectionType, setDiscoveredCollectionType] = useState<string>('table-row');
@@ -439,6 +455,45 @@ export function ExecutionPreflightModal({
       setStartStepIndex(start);
       setEndStepIndex(end);
       setLoopStepIndex(anchor);
+
+      // Detect or restore two-level (nested) loop configuration
+      const savedNested = (workflow.workflow_definition as any)?.nestedLoop ||
+                          (workflow.workflow_definition as any)?.itemFilter?.nestedLoop ||
+                          ((workflow.filter_rules as any)?.itemFilter?.nestedLoop);
+      if (savedNested && savedNested.enabled) {
+        setIsTwoLevel(true);
+        if (savedNested.outer) {
+          if (typeof savedNested.outer.anchorStepIndex === 'number') setOuterAnchorIndex(savedNested.outer.anchorStepIndex);
+          if (typeof savedNested.outer.startStepIndex === 'number') setOuterStartIndex(savedNested.outer.startStepIndex);
+          if (typeof savedNested.outer.endStepIndex === 'number') setOuterEndIndex(savedNested.outer.endStepIndex);
+          if (savedNested.outer.maxItems) setOuterMaxItems(String(savedNested.outer.maxItems));
+        }
+        if (savedNested.inner) {
+          if (typeof savedNested.inner.anchorStepIndex === 'number') setInnerAnchorIndex(savedNested.inner.anchorStepIndex);
+          if (typeof savedNested.inner.startStepIndex === 'number') setInnerStartIndex(savedNested.inner.startStepIndex);
+          if (typeof savedNested.inner.endStepIndex === 'number') setInnerEndIndex(savedNested.inner.endStepIndex);
+          if (savedNested.inner.maxItems) setInnerMaxItems(String(savedNested.inner.maxItems));
+        }
+      } else if (steps.length >= 4) {
+        // Sensible defaults for two-level workflows:
+        // Outer anchor at step index 1 (e.g. Select Company), inner anchor at bestCandidate (e.g. Select Invoice)
+        const outerCandidate = 1;
+        setOuterAnchorIndex(outerCandidate);
+        setOuterStartIndex(outerCandidate);
+        setOuterEndIndex(steps.length - 1);
+        const innerCandidate = bestCandidate > outerCandidate ? bestCandidate : Math.min(3, steps.length - 1);
+        setInnerAnchorIndex(innerCandidate);
+        setInnerStartIndex(innerCandidate);
+        setInnerEndIndex(Math.max(innerCandidate, steps.length - 2));
+      }
+
+      // Restore NEW_ONLY state if configured
+      const savedNewOnly = (workflow.workflow_definition as any)?.newOnly ??
+                           (workflow.workflow_definition as any)?.itemFilter?.newOnly ??
+                           ((workflow.filter_rules as any)?.itemFilter?.newOnly);
+      if (typeof savedNewOnly === 'boolean') {
+        setNewOnly(savedNewOnly);
+      }
 
       const cols = extractWorkflowColumns(workflow);
       setAvailableColumns(cols);
@@ -776,10 +831,24 @@ export function ExecutionPreflightModal({
 
   let loopValidationError: string | null = null;
   if (execMode === 'loop' && steps.length > 0) {
-    if (startStepIndex > endStepIndex) {
-      loopValidationError = `Start step (#${startStepIndex + 1}) cannot be after end step (#${endStepIndex + 1}).`;
-    } else if (anchorStepIndex < startStepIndex || anchorStepIndex > endStepIndex) {
-      loopValidationError = `Collection anchor step (#${anchorStepIndex + 1}) must be inside the loop range [Step #${startStepIndex + 1}..#${endStepIndex + 1}].`;
+    if (isTwoLevel) {
+      if (outerStartIndex > outerEndIndex) {
+        loopValidationError = `Company start step (#${outerStartIndex + 1}) cannot be after company return step (#${outerEndIndex + 1}).`;
+      } else if (outerAnchorIndex < outerStartIndex || outerAnchorIndex > outerEndIndex) {
+        loopValidationError = `Company anchor step (#${outerAnchorIndex + 1}) must be inside company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
+      } else if (innerStartIndex < outerStartIndex || innerEndIndex > outerEndIndex) {
+        loopValidationError = `Record loop range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}] must be enclosed within company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
+      } else if (innerStartIndex > innerEndIndex) {
+        loopValidationError = `Record start step (#${innerStartIndex + 1}) cannot be after record end step (#${innerEndIndex + 1}).`;
+      } else if (innerAnchorIndex < innerStartIndex || innerAnchorIndex > innerEndIndex) {
+        loopValidationError = `Record anchor step (#${innerAnchorIndex + 1}) must be inside record range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}].`;
+      }
+    } else {
+      if (startStepIndex > endStepIndex) {
+        loopValidationError = `Start step (#${startStepIndex + 1}) cannot be after end step (#${endStepIndex + 1}).`;
+      } else if (anchorStepIndex < startStepIndex || anchorStepIndex > endStepIndex) {
+        loopValidationError = `Collection anchor step (#${anchorStepIndex + 1}) must be inside the loop range [Step #${startStepIndex + 1}..#${endStepIndex + 1}].`;
+      }
     }
   }
 
@@ -872,6 +941,26 @@ export function ExecutionPreflightModal({
         }
       }
 
+      const constructedNestedLoop = (execMode === 'loop' && isTwoLevel) ? {
+        enabled: true,
+        mode: 'two_level',
+        outer: {
+          name: 'company',
+          anchorStepIndex: outerAnchorIndex,
+          startStepIndex: outerStartIndex,
+          endStepIndex: outerEndIndex,
+          maxItems: outerMaxItems.trim() ? parseInt(outerMaxItems, 10) : null,
+        },
+        inner: {
+          name: 'record',
+          anchorStepIndex: innerAnchorIndex,
+          startStepIndex: innerStartIndex,
+          endStepIndex: innerEndIndex,
+          maxItems: innerMaxItems.trim() ? parseInt(innerMaxItems, 10) : (itemsLimit > 0 ? itemsLimit : null),
+          filter: constructedFilter,
+        }
+      } : null;
+
       const res = await fetch('/api/v1/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -882,16 +971,18 @@ export function ExecutionPreflightModal({
           total_items_discovered: itemsLimit || 0,
           mode: execMode,
           isLoop: execMode === 'loop',
-          loopStepIndex: execMode === 'loop' ? anchorStepIndex : null,
+          loopStepIndex: execMode === 'loop' ? (isTwoLevel ? innerAnchorIndex : anchorStepIndex) : null,
           loop: execMode === 'loop' ? {
             enabled: true,
-            anchorStepIndex,
-            startStepIndex,
-            endStepIndex,
+            anchorStepIndex: isTwoLevel ? innerAnchorIndex : anchorStepIndex,
+            startStepIndex: isTwoLevel ? innerStartIndex : startStepIndex,
+            endStepIndex: isTwoLevel ? innerEndIndex : endStepIndex,
             maxItems: itemsLimit > 0 ? itemsLimit : null
           } : { enabled: false },
           loopLimit: execMode === 'loop' && itemsLimit > 0 ? itemsLimit : null,
           itemFilter: constructedFilter,
+          nestedLoop: constructedNestedLoop,
+          newOnly: execMode === 'loop' && newOnly,
         })
       });
 
@@ -1018,122 +1109,355 @@ export function ExecutionPreflightModal({
           {/* Loop Configuration (if loop selected) */}
           {execMode === 'loop' && (
             <div className="space-y-4 animate-in fade-in duration-150">
-              {/* Anchor Step Selector */}
-              <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="selectAnchorStep" className="block text-xs font-semibold text-slate-300">
-                    Collection Anchor Step (Identifies Rows / Items)
-                  </label>
-                  <span className="text-[11px] text-cyan-400 font-mono">
-                    Step #{anchorStepIndex + 1}
-                  </span>
+              {/* Loop Strategy Switch: Single Collection vs Controlled Two-Level Iteration */}
+              <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                    <span>Two-Level Iteration (Company → Records)</span>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-cyan-950 text-cyan-300 border border-cyan-800/60 uppercase">Controlled</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Outer loop selects companies; inner loop processes all invoices/records per company.
+                  </div>
                 </div>
-                {steps.length > 0 ? (
-                  <select
-                    id="selectAnchorStep"
-                    value={anchorStepIndex}
-                    onChange={(e) => {
-                      const idx = parseInt(e.target.value, 10);
-                      setAnchorStepIndex(idx);
-                      setLoopStepIndex(idx);
-                      if (idx < startStepIndex) setStartStepIndex(idx);
-                      if (idx > endStepIndex) setEndStepIndex(idx);
-                      handleRefreshFields(workflow, idx);
-                    }}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                  >
-                    {steps.map((step: any, idx: number) => (
-                      <option key={idx} value={idx}>
-                        {formatStepLabel(step, idx)} {idx === autoDetectedIndex ? '(Auto-detected Collection Anchor)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <p className="text-xs text-slate-500 italic">No recorded steps found in this workflow.</p>
-                )}
-                <p className="text-[11px] text-slate-400">
-                  Identifies the collection (table, list, cards) to iterate over.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsTwoLevel(!isTwoLevel)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    isTwoLevel ? 'bg-cyan-500' : 'bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      isTwoLevel ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
-              {/* Loop Step Range (Start & End) */}
-              <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Loop Range (Steps Repeated per Item)
-                  </label>
-                  <span className="text-[11px] text-cyan-400 font-mono">
-                    Steps #{startStepIndex + 1}..#{endStepIndex + 1} ({Math.max(0, endStepIndex - startStepIndex + 1)} step{endStepIndex === startStepIndex ? '' : 's'})
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="selectStartStep" className="block text-[11px] text-slate-400 mb-1">
-                      Start Step (Inclusive)
-                    </label>
-                    <select
-                      id="selectStartStep"
-                      value={startStepIndex}
-                      onChange={(e) => setStartStepIndex(parseInt(e.target.value, 10))}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                    >
-                      {steps.map((step: any, idx: number) => (
-                        <option key={idx} value={idx}>
-                          #{idx + 1}: {formatStepLabel(step, idx)}
-                        </option>
-                      ))}
-                    </select>
+              {!isTwoLevel ? (
+                <>
+                  {/* Single-Level Anchor Step Selector */}
+                  <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="selectAnchorStep" className="block text-xs font-semibold text-slate-300">
+                        Collection Anchor Step (Identifies Rows / Items)
+                      </label>
+                      <span className="text-[11px] text-cyan-400 font-mono">
+                        Step #{anchorStepIndex + 1}
+                      </span>
+                    </div>
+                    {steps.length > 0 ? (
+                      <select
+                        id="selectAnchorStep"
+                        value={anchorStepIndex}
+                        onChange={(e) => {
+                          const idx = parseInt(e.target.value, 10);
+                          setAnchorStepIndex(idx);
+                          setLoopStepIndex(idx);
+                          if (idx < startStepIndex) setStartStepIndex(idx);
+                          if (idx > endStepIndex) setEndStepIndex(idx);
+                          handleRefreshFields(workflow, idx);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                      >
+                        {steps.map((step: any, idx: number) => (
+                          <option key={idx} value={idx}>
+                            {formatStepLabel(step, idx)} {idx === autoDetectedIndex ? '(Auto-detected Collection Anchor)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-xs text-slate-500 italic">No recorded steps found in this workflow.</p>
+                    )}
+                    <p className="text-[11px] text-slate-400">
+                      Identifies the collection (table, list, cards) to iterate over.
+                    </p>
                   </div>
-                  <div>
-                    <label htmlFor="selectEndStep" className="block text-[11px] text-slate-400 mb-1">
-                      End Step (Inclusive)
-                    </label>
-                    <select
-                      id="selectEndStep"
-                      value={endStepIndex}
-                      onChange={(e) => setEndStepIndex(parseInt(e.target.value, 10))}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                    >
-                      {steps.map((step: any, idx: number) => (
-                        <option key={idx} value={idx}>
-                          #{idx + 1}: {formatStepLabel(step, idx)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
 
-                {/* Validation Error if any */}
-                {loopValidationError && (
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                    <span>{loopValidationError}</span>
-                  </div>
-                )}
+                  {/* Loop Step Range (Start & End) */}
+                  <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Loop Range (Steps Repeated per Item)
+                      </label>
+                      <span className="text-[11px] text-cyan-400 font-mono">
+                        Steps #{startStepIndex + 1}..#{endStepIndex + 1} ({Math.max(0, endStepIndex - startStepIndex + 1)} step{endStepIndex === startStepIndex ? '' : 's'})
+                      </span>
+                    </div>
 
-                {/* Execution Plan Flow */}
-                <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
-                  <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
-                    <div className="font-semibold text-slate-300">Setup (Once)</div>
-                    <div className="text-slate-400 mt-0.5">
-                      {startStepIndex > 0 ? `Steps 1..${startStepIndex}` : 'None'}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="selectStartStep" className="block text-[11px] text-slate-400 mb-1">
+                          Start Step (Inclusive)
+                        </label>
+                        <select
+                          id="selectStartStep"
+                          value={startStepIndex}
+                          onChange={(e) => setStartStepIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="selectEndStep" className="block text-[11px] text-slate-400 mb-1">
+                          End Step (Inclusive)
+                        </label>
+                        <select
+                          id="selectEndStep"
+                          value={endStepIndex}
+                          onChange={(e) => setEndStepIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Validation Error if any */}
+                    {loopValidationError && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                        <span>{loopValidationError}</span>
+                      </div>
+                    )}
+
+                    {/* Execution Plan Flow */}
+                    <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
+                        <div className="font-semibold text-slate-300">Setup (Once)</div>
+                        <div className="text-slate-400 mt-0.5">
+                          {startStepIndex > 0 ? `Steps 1..${startStepIndex}` : 'None'}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-800/40">
+                        <div className="font-semibold text-cyan-300">Loop (Per Item)</div>
+                        <div className="text-cyan-400 mt-0.5">
+                          Steps {startStepIndex + 1}..{endStepIndex + 1}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
+                        <div className="font-semibold text-slate-300">Teardown (Once)</div>
+                        <div className="text-slate-400 mt-0.5">
+                          {endStepIndex < steps.length - 1 ? `Steps ${endStepIndex + 2}..${steps.length}` : 'None'}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-800/40">
-                    <div className="font-semibold text-cyan-300">Loop (Per Item)</div>
-                    <div className="text-cyan-400 mt-0.5">
-                      Steps {startStepIndex + 1}..{endStepIndex + 1}
+                </>
+              ) : (
+                <>
+                  {/* Two-Level: Outer Level (Company Collection) */}
+                  <div className="space-y-3 p-3.5 rounded-xl border border-cyan-900/40 bg-cyan-950/20">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">Level 1: Company Collection (Outer)</span>
+                      </div>
+                      <span className="text-[11px] text-cyan-400 font-mono">
+                        Company Anchor: Step #{outerAnchorIndex + 1}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="selectOuterAnchorStep" className="block text-xs font-semibold text-slate-300">
+                        Company Anchor Step (Selects Company in Portal)
+                      </label>
+                      <select
+                        id="selectOuterAnchorStep"
+                        value={outerAnchorIndex}
+                        onChange={(e) => {
+                          const idx = parseInt(e.target.value, 10);
+                          setOuterAnchorIndex(idx);
+                          if (idx < outerStartIndex) setOuterStartIndex(idx);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                      >
+                        {steps.map((step: any, idx: number) => (
+                          <option key={idx} value={idx}>
+                            {formatStepLabel(step, idx)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label htmlFor="selectOuterStartStep" className="block text-[11px] text-slate-400 mb-1">
+                          Outer Start Step
+                        </label>
+                        <select
+                          id="selectOuterStartStep"
+                          value={outerStartIndex}
+                          onChange={(e) => setOuterStartIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="selectOuterEndStep" className="block text-[11px] text-slate-400 mb-1">
+                          Return Step to Company View (Outer End)
+                        </label>
+                        <select
+                          id="selectOuterEndStep"
+                          value={outerEndIndex}
+                          onChange={(e) => setOuterEndIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
-                    <div className="font-semibold text-slate-300">Teardown (Once)</div>
-                    <div className="text-slate-400 mt-0.5">
-                      {endStepIndex < steps.length - 1 ? `Steps ${endStepIndex + 2}..${steps.length}` : 'None'}
+
+                  {/* Two-Level: Inner Level (Record / Invoice Collection) */}
+                  <div className="space-y-3 p-3.5 rounded-xl border border-emerald-900/40 bg-emerald-950/20">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">Level 2: Record Collection (Inner Invoices)</span>
+                      </div>
+                      <span className="text-[11px] text-emerald-400 font-mono">
+                        Record Anchor: Step #{innerAnchorIndex + 1}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="selectInnerAnchorStep" className="block text-xs font-semibold text-slate-300">
+                        Record Anchor Step (Identifies Rows to Iterate)
+                      </label>
+                      <select
+                        id="selectInnerAnchorStep"
+                        value={innerAnchorIndex}
+                        onChange={(e) => {
+                          const idx = parseInt(e.target.value, 10);
+                          setInnerAnchorIndex(idx);
+                          if (idx < innerStartIndex) setInnerStartIndex(idx);
+                          if (idx > innerEndIndex) setInnerEndIndex(idx);
+                          handleRefreshFields(workflow, idx);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+                      >
+                        {steps.map((step: any, idx: number) => (
+                          <option key={idx} value={idx}>
+                            {formatStepLabel(step, idx)} {idx === autoDetectedIndex ? '(Auto-detected Record Anchor)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label htmlFor="selectInnerStartStep" className="block text-[11px] text-slate-400 mb-1">
+                          Record Actions Start
+                        </label>
+                        <select
+                          id="selectInnerStartStep"
+                          value={innerStartIndex}
+                          onChange={(e) => setInnerStartIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="selectInnerEndStep" className="block text-[11px] text-slate-400 mb-1">
+                          Record Actions End
+                        </label>
+                        <select
+                          id="selectInnerEndStep"
+                          value={innerEndIndex}
+                          onChange={(e) => setInnerEndIndex(parseInt(e.target.value, 10))}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
+                        >
+                          {steps.map((step: any, idx: number) => (
+                            <option key={idx} value={idx}>
+                              #{idx + 1}: {formatStepLabel(step, idx)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
+
+                  {/* Validation Error if any */}
+                  {loopValidationError && (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                      <span>{loopValidationError}</span>
+                    </div>
+                  )}
+
+                  {/* 5-Phase Execution Plan Flow */}
+                  <div className="space-y-2 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
+                    <div className="text-xs font-semibold text-slate-300">Controlled Execution Sequence</div>
+                    <div className="grid grid-cols-5 gap-1.5 pt-1 text-[10px]">
+                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80 text-center">
+                        <div className="font-semibold text-slate-400 uppercase">Phase 1</div>
+                        <div className="font-medium text-slate-200 mt-0.5 truncate">Login / Setup</div>
+                        <div className="text-slate-500 mt-1 font-mono">
+                          {outerStartIndex > 0 ? `1..${outerStartIndex}` : 'None'}
+                        </div>
+                        <span className="inline-block mt-1 px-1 rounded bg-slate-800 text-[9px] text-slate-400">Once</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-center">
+                        <div className="font-semibold text-cyan-400 uppercase">Phase 2</div>
+                        <div className="font-medium text-cyan-200 mt-0.5 truncate">Select Co.</div>
+                        <div className="text-cyan-400/80 mt-1 font-mono">
+                          {outerStartIndex + 1}..{innerStartIndex}
+                        </div>
+                        <span className="inline-block mt-1 px-1 rounded bg-cyan-900/60 text-[9px] text-cyan-300">Per Co.</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-center">
+                        <div className="font-semibold text-emerald-400 uppercase">Phase 3</div>
+                        <div className="font-medium text-emerald-200 mt-0.5 truncate">Records</div>
+                        <div className="text-emerald-400/80 mt-1 font-mono">
+                          {innerStartIndex + 1}..{innerEndIndex + 1}
+                        </div>
+                        <span className="inline-block mt-1 px-1 rounded bg-emerald-900/60 text-[9px] text-emerald-300">Per Rec.</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-center">
+                        <div className="font-semibold text-cyan-400 uppercase">Phase 4</div>
+                        <div className="font-medium text-cyan-200 mt-0.5 truncate">Return Co.</div>
+                        <div className="text-cyan-400/80 mt-1 font-mono">
+                          {innerEndIndex + 1 < outerEndIndex + 1 ? `${innerEndIndex + 2}..${outerEndIndex + 1}` : `${outerEndIndex + 1}`}
+                        </div>
+                        <span className="inline-block mt-1 px-1 rounded bg-cyan-900/60 text-[9px] text-cyan-300">Per Co.</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80 text-center">
+                        <div className="font-semibold text-slate-400 uppercase">Phase 5</div>
+                        <div className="font-medium text-slate-200 mt-0.5 truncate">Teardown</div>
+                        <div className="text-slate-500 mt-1 font-mono">
+                          {outerEndIndex < steps.length - 1 ? `${outerEndIndex + 2}..${steps.length}` : 'None'}
+                        </div>
+                        <span className="inline-block mt-1 px-1 rounded bg-slate-800 text-[9px] text-slate-400">Once</span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Discovered Records Preview */}
               <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
@@ -1239,17 +1563,61 @@ export function ExecutionPreflightModal({
                   <span>Batch Iteration Limits</span>
                 </div>
 
-                <div className="pt-1">
-                  <label htmlFor="inputMaxItems" className="block text-xs text-slate-300 mb-1 font-medium">Max Items Limit</label>
-                  <input
-                    id="inputMaxItems"
-                    type="number"
-                    min="1"
-                    placeholder="All items (no limit)"
-                    value={maxItems}
-                    onChange={(e) => setMaxItems(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-                  />
+                <div className={isTwoLevel ? "grid grid-cols-2 gap-3" : ""}>
+                  {isTwoLevel && (
+                    <div>
+                      <label htmlFor="inputMaxCompanies" className="block text-xs text-slate-300 mb-1 font-medium">Max Companies</label>
+                      <input
+                        id="inputMaxCompanies"
+                        type="number"
+                        min="1"
+                        placeholder="All companies"
+                        value={outerMaxItems}
+                        onChange={(e) => setOuterMaxItems(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label htmlFor="inputMaxItems" className="block text-xs text-slate-300 mb-1 font-medium">
+                      {isTwoLevel ? 'Max Records per Company' : 'Max Items Limit'}
+                    </label>
+                    <input
+                      id="inputMaxItems"
+                      type="number"
+                      min="1"
+                      placeholder="All items (no limit)"
+                      value={maxItems}
+                      onChange={(e) => setMaxItems(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* NEW_ONLY deduplication toggle */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <span>Process New Records Only (NEW_ONLY)</span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/60 uppercase">Deduplication</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Skip previously processed records across runs using composite identity ({isTwoLevel ? 'companyId / recordId' : 'recordId'}).
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewOnly(!newOnly)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      newOnly ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        newOnly ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
 

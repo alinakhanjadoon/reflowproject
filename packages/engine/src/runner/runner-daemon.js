@@ -325,6 +325,8 @@ class RunnerDaemon {
       const { resolveItemFilter } = require('../shared/item-filter');
       const itemFilter = resolveItemFilter(run, workflow, def);
       const rowFilter = run.rowFilter ?? run.row_filter ?? def.rowFilter ?? itemFilter;
+      const nestedLoop = run.nestedLoop || run.item_filter?.nestedLoop || run.itemFilter?.nestedLoop || def.nestedLoop || null;
+      const newOnly = run.newOnly ?? run.item_filter?.newOnly ?? run.itemFilter?.newOnly ?? def.newOnly ?? false;
 
       const loopLimit = run.loopLimit ??
         run.loop_limit ??
@@ -421,6 +423,8 @@ class RunnerDaemon {
         baseRecordingsDir: path.join(path.dirname(runTargetDir), 'recordings'),
         itemFilter: itemFilter,
         rowFilter: rowFilter,
+        nestedLoop: nestedLoop,
+        newOnly: newOnly,
         loopLimit: loopLimit,
         loopStepIndex: loopStepIndex,
         isLoop: isLoop,
@@ -518,6 +522,8 @@ class RunnerDaemon {
         } : null),
         itemFilter: itemFilter,
         rowFilter: rowFilter,
+        nestedLoop: nestedLoop,
+        newOnly: newOnly,
         loopLimit: loopLimit,
       };
 

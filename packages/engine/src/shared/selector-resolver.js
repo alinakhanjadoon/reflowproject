@@ -944,17 +944,23 @@
     }
 
     // Strict action element text mismatch penalty:
-    // If an action element (button, link, menu item) has an explicit recorded text label (e.g. "Close", "Save"),
-    // an element with completely conflicting text (e.g. "Archive") must not be accepted!
-    const isActionElement = (
-      element.tagName === 'BUTTON' ||
-      element.tagName === 'A' ||
-      (element.getAttribute && (element.getAttribute('role') === 'button' || element.getAttribute('role') === 'menuitem')) ||
+    // If an action element (button, link, menu item, or inner span/icon) has an explicit recorded text label (e.g. "Close", "Save"),
+    // an element with completely conflicting text (e.g. "Archive") must not be accepted under any circumstances!
+    const isActionOrInteractive = Boolean(
+      elemTag === 'button' ||
+      elemTag === 'a' ||
+      targetTag === 'button' ||
+      targetTag === 'a' ||
+      (element.getAttribute && (element.getAttribute('role') === 'button' || element.getAttribute('role') === 'menuitem' || element.getAttribute('role') === 'tab')) ||
+      (fingerprint.role === 'button' || fingerprint.role === 'menuitem' || fingerprint.role === 'tab') ||
       hasElementClass(element, 'x-btn') ||
-      hasElementClass(element, 'btn')
+      hasElementClass(element, 'x-btn-inner') ||
+      hasElementClass(element, 'btn') ||
+      (typeof element.closest === 'function' && element.closest('button, a, [role="button"], [role="menuitem"], .x-btn, .btn')) ||
+      /^(close|save|archive|submit|export|download|cancel|ok|yes|no|delete|search|filter|print|run|open|edit|view|add|refresh)$/i.test(targetText)
     );
-    if (isActionElement && targetText && elemText && targetText.length >= 2 && elemText.length >= 2 && textScore === 0.0) {
-      score *= 0.25; // Severely penalize conflicting button text so it falls below MIN_CONFIDENCE_THRESHOLD
+    if (isActionOrInteractive && targetText && elemText && targetText.length >= 2 && elemText.length >= 2 && textScore === 0.0) {
+      score *= 0.10; // Drastically reduce score (e.g. 0.73 -> 0.07) so conflicting button text is completely rejected
     }
 
     const roundedScore = Math.round(score * 100) / 100;
