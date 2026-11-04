@@ -187,11 +187,11 @@ class ReplayEngine extends EventEmitter {
    * Wait for any transient SPA/ExtJS loading masks, spinners, or aria-busy indicators to disappear.
    * Resiliently detects fixed and absolute loading overlays, ExtJS masks, and text-based "Loading..." indicators.
    */
-  async _waitForLoadingMasks(timeoutMs = 15000) {
+  async _waitForLoadingMasks(timeoutMs = 25000) {
     if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
     try {
       // Brief initial settle delay so asynchronous load masks have time to mount
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 500));
 
       await this.page.waitForFunction(() => {
         const isElementVisible = (el) => {
@@ -283,7 +283,7 @@ class ReplayEngine extends EventEmitter {
   /**
    * Wait for any active ExtJS AJAX requests to complete to prevent firing next action during background data loads.
    */
-  async _waitForExtAjaxIdle(timeoutMs = 15000) {
+  async _waitForExtAjaxIdle(timeoutMs = 25000) {
     if (!this.page || (typeof this.page.isClosed === 'function' && this.page.isClosed())) return;
     try {
       await this.page.waitForFunction(() => {
@@ -765,8 +765,8 @@ class ReplayEngine extends EventEmitter {
       }
 
       // 2. Wait for any active ExtJS/SPA loading masks or in-flight AJAX requests to clear
-      await this._waitForLoadingMasks(15000);
-      await this._waitForExtAjaxIdle(15000);
+      await this._waitForLoadingMasks(25000);
+      await this._waitForExtAjaxIdle(25000);
 
       if (this.isAborted) {
         throw new Error('Execution stopped by user');
@@ -868,11 +868,12 @@ class ReplayEngine extends EventEmitter {
       }
 
       // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 800));
 
       // Wait for any newly triggered loading masks or AJAX requests to clear before proceeding
-      await this._waitForLoadingMasks(15000);
-      await this._waitForExtAjaxIdle(15000);
+      await this._waitForLoadingMasks(25000);
+      await this._waitForExtAjaxIdle(25000);
+      await new Promise(r => setTimeout(r, 350));
 
       const scorePercent = Math.round(confidenceScore * 100);
       logger.action(index + 1, action.type, candidate.value, `score=${scorePercent}%`);
@@ -941,9 +942,10 @@ class ReplayEngine extends EventEmitter {
         }
 
         // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-        await new Promise(r => setTimeout(r, 600));
-        await this._waitForLoadingMasks(15000);
-        await this._waitForExtAjaxIdle(15000);
+        await new Promise(r => setTimeout(r, 800));
+        await this._waitForLoadingMasks(25000);
+        await this._waitForExtAjaxIdle(25000);
+        await new Promise(r => setTimeout(r, 350));
 
         return { success: true, scoped: true };
       } finally {
@@ -1051,8 +1053,8 @@ class ReplayEngine extends EventEmitter {
       }
       await this._waitWhilePaused();
 
-      // If element resolution has been blocked for >600ms, proactively clear any unexpected popups or alerts
-      if (this.interruptionHandler && this.page && (Date.now() - lastInterruptionCheck > 600)) {
+      // If element resolution has been blocked for >4000ms, clear any unexpected popups or alerts
+      if (this.interruptionHandler && this.page && (Date.now() - lastInterruptionCheck > 4000)) {
         lastInterruptionCheck = Date.now();
         await this.interruptionHandler.clearLingeringDialogs(this.page).catch(() => {});
         await this.interruptionHandler.dismissBlockingOverlays(this.page, { target }).catch(() => {});
@@ -1441,9 +1443,10 @@ class ReplayEngine extends EventEmitter {
         logger.action(action.index + 1, action.type, candidate.value, detail);
 
         // Post-action settle delay for browser event propagation, network initiation, and DOM hydration
-        await new Promise(r => setTimeout(r, 600));
-        await this._waitForLoadingMasks(15000);
-        await this._waitForExtAjaxIdle(15000);
+        await new Promise(r => setTimeout(r, 800));
+        await this._waitForLoadingMasks(25000);
+        await this._waitForExtAjaxIdle(25000);
+        await new Promise(r => setTimeout(r, 350));
 
         // Calculate humanized post-action timing delay
         const postDelay = ActionDispatcher.calculatePostActionDelay(this.botConfig);

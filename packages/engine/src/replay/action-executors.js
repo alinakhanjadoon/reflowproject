@@ -561,6 +561,7 @@ async function executeClick(elementHandle, action, options = {}) {
 
   let clicked = false;
   try {
+    action._clickDispatched = true;
     // Primary: Trusted Puppeteer CDP click with timeout guard (2500ms) against download hangs.
     // Dispatches authentic OS-level mouse events providing Chrome transient user activation.
     await Promise.race([

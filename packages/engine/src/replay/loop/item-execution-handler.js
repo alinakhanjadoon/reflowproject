@@ -1040,8 +1040,8 @@ class ItemExecutionHandler {
 
           // Ensure any loading masks or in-flight AJAX requests settle before proceeding
           if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
-            await replayEngine._waitForLoadingMasks(15000).catch(() => {});
-            await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+            await replayEngine._waitForLoadingMasks(25000).catch(() => {});
+            await replayEngine._waitForExtAjaxIdle(25000).catch(() => {});
           }
 
           if (isDropdown && actionOffset === 0 && action.scope === 'item') {
@@ -1167,12 +1167,12 @@ class ItemExecutionHandler {
             itemResult
           );
           // Pacing settle delay for legacy enterprise portals & ensure loading masks settle
-          await new Promise(r => setTimeout(r, 800));
+          await new Promise(r => setTimeout(r, 1000));
           if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
-            await replayEngine._waitForLoadingMasks(15000).catch(() => {});
-            await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+            await replayEngine._waitForLoadingMasks(25000).catch(() => {});
+            await replayEngine._waitForExtAjaxIdle(25000).catch(() => {});
           }
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 400));
         }
 
         const extraFields = replayEngine && typeof replayEngine.getExtractedRowFields === 'function'
@@ -1182,10 +1182,10 @@ class ItemExecutionHandler {
         itemResult.fields = { ...(targetItem.fields || {}) };
 
         // Allow the complete per-item procedure to settle before restoring state.
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 1200));
         if (replayEngine && typeof replayEngine._waitForLoadingMasks === 'function') {
-          await replayEngine._waitForLoadingMasks(15000).catch(() => {});
-          await replayEngine._waitForExtAjaxIdle(15000).catch(() => {});
+          await replayEngine._waitForLoadingMasks(25000).catch(() => {});
+          await replayEngine._waitForExtAjaxIdle(25000).catch(() => {});
         }
 
         // Check if any late download arrived for this item (e.g. late export/save response)

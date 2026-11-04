@@ -349,7 +349,6 @@ class InterruptionHandler {
             '.mat-mdc-dialog-container',
             '.dx-dialog',
             '.dx-overlay-content',
-            '.x-window:not(.x-hidden):not(.x-window-minimized)',
             '.ant-modal',
             '.ant-modal-wrap',
             '.MuiDialog-root',
@@ -496,6 +495,19 @@ class InterruptionHandler {
 
             if (containsTarget) {
               // Target is inside container, skip to next candidate
+              continue;
+            }
+
+            // Protect Application Windows & Data Grids:
+            // Do NOT dismiss application workspace windows (e.g. ExtJS .x-window), full application screens,
+            // or containers containing enterprise data tables, forms, or grids.
+            // These are destination application screens, NEVER spam popups or cookie banners!
+            const isAppWindow = Boolean(
+              (container.classList && (container.classList.contains('x-window') || container.classList.contains('x-panel'))) ||
+              (container.closest && container.closest('.x-window')) ||
+              (container.querySelector && container.querySelector('.x-grid, .x-grid-view, .x-panel-body, .x-window-header, .x-tab-bar, table thead, [role="grid"], [role="treegrid"]'))
+            );
+            if (isAppWindow) {
               continue;
             }
 
@@ -706,10 +718,9 @@ class InterruptionHandler {
    * @returns {Promise<any>}
    */
   async executeWithRecovery(page, action, executionFn) {
-    // Proactive checks: clear any dialog or unexpected overlay sitting unhandled before running action
+    // Proactive check: clear any native browser alert() or confirm() sitting unhandled
     if (page && (typeof page.isClosed !== 'function' || !page.isClosed())) {
       await this.clearLingeringDialogs(page).catch(() => {});
-      await this.dismissBlockingOverlays(page, action).catch(() => {});
     }
 
     try {
@@ -747,8 +758,14 @@ class InterruptionHandler {
       const clearedOverlay = await this.dismissBlockingOverlays(page, action);
 
       if (clearedDialog || clearedOverlay) {
+        // Prevent duplicate clicks: If a CLICK action was already dispatched to the browser,
+        // re-dispatching it can cause double/triple window openings on legacy portals!
+        if (action?.type === 'CLICK' && action._clickDispatched) {
+          logger.info(`[InterruptionHandler] Click was already dispatched for action #${action?.index || 0}; skipping re-click to prevent duplicate window openings.`);
+          return;
+        }
         logger.info(`[InterruptionHandler] Interruption cleared (dialog=${clearedDialog}, overlay=${clearedOverlay}). Retrying action #${action?.index || 0}...`);
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 600));
         return await executionFn();
       }
 
@@ -835,7 +852,19 @@ class InterruptionHandler {
           }
         } catch {}
 
-        if (allWindows.length <= 1) return { closedCount: 0, keptTitle: null };
+        const nodeContains = (parent, child) => {
+          if (!parent || !child) return false;
+          if (typeof parent.contains === 'function') return parent.contains(child);
+          return false;
+        };
+
+        // Deduplicate nested elements: keep ONLY the outermost window containers!
+        // An inner container or panel inside an .x-window is part of that window, NOT an independent duplicate window!
+        const topWindows = allWindows.filter(w => {
+          return !allWindows.some(other => other !== w && nodeContains(other, w));
+        });
+
+        if (topWindows.length <= 1) return { closedCount: 0, keptTitle: null };
 
         const getWindowTitle = (w) => {
           const titleEl = w.querySelector(
@@ -843,24 +872,22 @@ class InterruptionHandler {
           ) || w.querySelector('.x-window-header, [class*="header" i]');
           let text = (titleEl ? titleEl.textContent : '') || '';
           text = text.toLowerCase().replace(/\b(close|dismiss|minimize|maximize|restore)\b/gi, '').replace(/\s+/g, ' ').trim();
-          if (text.length >= 3) return text;
+          if (text.length >= 4) return text;
 
           // Fallback: check inner grid header, tab panel, or table headers
           const header = w.querySelector('.x-grid-header, .x-grid3-header, .x-tab-bar, thead, th, .x-panel-header');
           if (header) {
             const hText = (header.textContent || '').slice(0, 60).toLowerCase().replace(/\s+/g, ' ').trim();
-            if (hText.length >= 3) return hText;
+            if (hText.length >= 4) return hText;
           }
 
-          const cls = (w.className || '').toString().trim();
-          if (cls.includes('x-window')) return 'ext-window-generic';
-          return (w.textContent || '').slice(0, 50).trim().toLowerCase() || 'dialog-generic';
+          return null; // Do NOT group windows if title is absent or generic
         };
 
         const groups = new Map();
-        for (const w of allWindows) {
+        for (const w of topWindows) {
           const title = getWindowTitle(w);
-          if (!title || title.length < 3) continue;
+          if (!title) continue;
           if (!groups.has(title)) groups.set(title, []);
           groups.get(title).push(w);
         }
@@ -883,33 +910,26 @@ class InterruptionHandler {
           });
 
           keptTitle = title;
+          const keptWindow = wins[0];
           const duplicatesToClose = wins.slice(1);
 
           for (const dup of duplicatesToClose) {
+            // Absolute safety check: Never touch the kept window or any element inside it!
+            if (dup === keptWindow || nodeContains(keptWindow, dup) || nodeContains(dup, keptWindow)) continue;
             let dismissed = false;
 
-            // 1. ExtJS native component destroy/close (most reliable for ERP ExtJS windows)
+            // 1. ExtJS native component destroy/close (strictly for the duplicate window itself)
             try {
-              if (typeof window.Ext !== 'undefined') {
-                let cmp = null;
-                if (window.Ext.getCmp) {
-                  cmp = window.Ext.getCmp(dup.id);
-                  if (!cmp && dup.parentElement) {
-                    cmp = window.Ext.getCmp(dup.parentElement.id);
-                  }
-                  if (!cmp && typeof dup.closest === 'function') {
-                    const idEl = dup.closest('[id]');
-                    if (idEl) cmp = window.Ext.getCmp(idEl.id);
-                  }
-                }
-                if (cmp) {
-                  if (typeof cmp.close === 'function') {
+              if (typeof window.Ext !== 'undefined' && window.Ext.getCmp && dup.id) {
+                if (dup.id !== keptWindow.id) {
+                  const cmp = window.Ext.getCmp(dup.id);
+                  if (cmp && typeof cmp.close === 'function') {
                     cmp.close();
                     dismissed = true;
-                  } else if (typeof cmp.destroy === 'function') {
+                  } else if (cmp && typeof cmp.destroy === 'function') {
                     cmp.destroy();
                     dismissed = true;
-                  } else if (typeof cmp.hide === 'function') {
+                  } else if (cmp && typeof cmp.hide === 'function') {
                     cmp.hide();
                     dismissed = true;
                   }
@@ -917,11 +937,12 @@ class InterruptionHandler {
               }
             } catch {}
 
-            // 2. Click close button inside duplicate window
+            // 2. Click close button inside duplicate window (verifying button is NOT in kept window)
             try {
               const candidateButtons = Array.from(dup.querySelectorAll(
                 'button, a, [role="button"], .x-tool, .x-tool-close, .close, .btn-close, .modal-close, span, div'
               )).filter(btn => {
+                if (nodeContains(keptWindow, btn)) return false;
                 const text = (btn.textContent || btn.value || '').trim();
                 const aria = (btn.getAttribute('aria-label') || '').trim();
                 const bTitle = (btn.getAttribute('title') || '').trim();
@@ -941,24 +962,26 @@ class InterruptionHandler {
               }
             } catch {}
 
-            // 3. Guarantee DOM removal and hiding so duplicate NEVER remains visible on screen
+            // 3. Guarantee DOM removal and hiding ONLY for duplicate
             try {
-              if (dup.style) {
-                dup.style.display = 'none';
-                dup.style.visibility = 'hidden';
-                dup.style.left = '-10000px';
-                dup.style.top = '-10000px';
+              if (dup !== keptWindow && !nodeContains(dup, keptWindow)) {
+                if (dup.style) {
+                  dup.style.display = 'none';
+                  dup.style.visibility = 'hidden';
+                  dup.style.left = '-10000px';
+                  dup.style.top = '-10000px';
+                }
+                if (typeof dup.setAttribute === 'function') {
+                  dup.setAttribute('aria-hidden', 'true');
+                }
+                if (dup.classList && typeof dup.classList.add === 'function') {
+                  dup.classList.add('x-hidden', 'x-hidden-offsets');
+                }
+                if (typeof dup.remove === 'function') {
+                  dup.remove();
+                }
+                dismissed = true;
               }
-              if (typeof dup.setAttribute === 'function') {
-                dup.setAttribute('aria-hidden', 'true');
-              }
-              if (dup.classList && typeof dup.classList.add === 'function') {
-                dup.classList.add('x-hidden', 'x-hidden-offsets');
-              }
-              if (typeof dup.remove === 'function') {
-                dup.remove();
-              }
-              dismissed = true;
             } catch {}
 
             if (dismissed) closedCount++;
