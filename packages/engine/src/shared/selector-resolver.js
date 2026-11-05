@@ -892,7 +892,16 @@
     const targetText = normalizeText(fingerprint.text || fingerprint.attributes?.value || '');
     const elemText = normalizeText((element.value !== undefined && element.value !== null ? element.value : '') || element.textContent || '');
 
-    if (!targetText) {
+    const isCheckboxElement = Boolean(
+      fingerprint.isCheckbox ||
+      fingerprint.type === 'checkbox' ||
+      fingerprint.role === 'checkbox' ||
+      (element.tagName === 'INPUT' && (element.type || '').toLowerCase() === 'checkbox') ||
+      (element.getAttribute && element.getAttribute('role') === 'checkbox')
+    );
+
+    if (!targetText || isCheckboxElement) {
+      // Checkboxes do not have their own text nodes; row text from recording must not penalize different records
       textScore = 1.0;
     } else if (targetText === elemText) {
       textScore = 1.0;
@@ -1129,6 +1138,37 @@
           reason: `Syntax or execution error: ${err.message}`
         });
         continue;
+      }
+
+      if (matchedNodes.length === 0 && candidate.value) {
+        // Table cell / column relaxation:
+        // If candidate contains a specific column index (td:nth-of-type(N) or td[N]),
+        // table columns often shift dynamically when optional fields are present across records.
+        const isTableCol = /td:nth-of-type\(\d+\)|td\[\d+\]/i.test(candidate.value);
+        if (isTableCol) {
+          const relaxedValue = candidate.value
+            .replace(/td:nth-of-type\(\d+\)/gi, 'td')
+            .replace(/td\[\d+\]/gi, 'td');
+          try {
+            const relaxedMatches = isXpath ? queryXPath(relaxedValue, d) : queryAll(relaxedValue, d);
+            if (relaxedMatches.length > 0) {
+              matchedNodes = relaxedMatches;
+            }
+          } catch {}
+        }
+
+        // If still 0 matches and target is a table checkbox, find checkboxes in table rows
+        if (matchedNodes.length === 0 && (target.isCheckbox || target.fingerprint?.isCheckbox || target.fingerprint?.type === 'checkbox')) {
+          const isTableTarget = /table|tbody|tr|td/i.test(candidate.value);
+          if (isTableTarget) {
+            try {
+              const tableCbs = queryAll('table tbody tr td input[type="checkbox"], table tbody tr input[type="checkbox"], [role="row"] [role="checkbox"]', d);
+              if (tableCbs.length > 0) {
+                matchedNodes = tableCbs;
+              }
+            } catch {}
+          }
+        }
       }
 
       if (matchedNodes.length === 0) {

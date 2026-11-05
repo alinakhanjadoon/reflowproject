@@ -50,6 +50,7 @@ downloads/
 data/
 Run/
 **/Run/
+scratch/
 
 # Knowledge graph (rebuild with: graphify update .)
 graphify-out/

@@ -873,6 +873,36 @@ class ReplayEngine extends EventEmitter {
       // Wait for any newly triggered loading masks or AJAX requests to clear before proceeding
       await this._waitForLoadingMasks(25000);
       await this._waitForExtAjaxIdle(25000);
+
+      // Search / Filter Settle Guard:
+      // If action was a search/query trigger, allow full network and table rendering cycle to complete
+      const isSearchOrFilterAction = Boolean(
+        actionType === 'CLICK' && (
+          (action.name && /search|filter|find|query|apply/i.test(action.name)) ||
+          (action.value && /search|filter|find|query|apply/i.test(action.value)) ||
+          (action.target?.candidates?.some(c => c.value && /search|filter|btnSearch/i.test(c.value)))
+        )
+      );
+      if (isSearchOrFilterAction && this.page) {
+        logger.info(`[Replay] Search/Filter action dispatched. Waiting for search results to load and settle...`);
+        await new Promise(r => setTimeout(r, 1200));
+        await this._waitForLoadingMasks(25000);
+        await this._waitForExtAjaxIdle(25000);
+        try {
+          await this.page.waitForFunction(() => {
+            const spinners = document.querySelectorAll('.loading, .spinner, mat-progress-spinner, mat-spinner, .cdk-overlay-backdrop-showing, .mat-progress-bar, .x-mask');
+            for (const s of spinners) {
+              const style = window.getComputedStyle(s);
+              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                return false;
+              }
+            }
+            return true;
+          }, { timeout: 15000 }).catch(() => {});
+        } catch {}
+        await new Promise(r => setTimeout(r, 800));
+      }
+
       await new Promise(r => setTimeout(r, 350));
 
       const scorePercent = Math.round(confidenceScore * 100);

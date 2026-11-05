@@ -734,6 +734,30 @@ async function executeClick(elementHandle, action, options = {}) {
           elementName: action.elementName || action.name
         });
       }
+
+      // Multi-record table checkbox handling ("when elements come click them and download them"):
+      // If the target is a checkbox inside a data table and the user intended to check it,
+      // ensure all returned rows in the table are selected so that the subsequent batch download captures all records
+      if (desiredState === true) {
+        await clickTarget.evaluate((el) => {
+          const table = el.closest('table');
+          if (!table) return;
+          const rows = table.querySelectorAll('tbody tr');
+          if (rows.length > 1) {
+            const headerCb = table.querySelector('thead tr input[type="checkbox"], th input[type="checkbox"]');
+            if (headerCb && !headerCb.checked) {
+              headerCb.click();
+              return;
+            }
+            const rowCbs = table.querySelectorAll('tbody tr td input[type="checkbox"], tbody tr input[type="checkbox"]');
+            for (const cb of rowCbs) {
+              if (!cb.checked) {
+                cb.click();
+              }
+            }
+          }
+        }).catch(() => {});
+      }
       logger.info(`[Replay] Checkbox "${action.elementName || action.name || 'Checkbox'}" state successfully verified: ${desiredState ? 'CHECKED' : 'UNCHECKED'}.`);
     } catch (verifyErr) {
       if (verifyErr instanceof ActionExecutionError) throw verifyErr;
