@@ -6,6 +6,7 @@ interface RouteContext {
 }
 
 const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/i;
+const IGNORED_COLUMN_NAMES = /^(select|selection|checkbox|actions?|operations?|manage|controls?|tools?|_cells|_rawtext|text|label|fulltext|username(\s*input)?|email|password(\s*password\s*field)?|login(\s*button)?|sign\s*in|company(\s*input|\s*link)?|close(\s*button)?|submit|button|element|click|open\s*selected|scroll.*)$/i;
 
 function cleanStringValue(val: unknown): string {
   if (val === null || val === undefined) return '';
@@ -66,6 +67,8 @@ export async function POST(
     if (EXPANDER_GLYPH_REGEX.test(str)) return;
     str = str.replace(/^(click|select|enter|type|open|download|view|press)\s+/i, '').trim();
     if (!str || str.length > 50) return;
+    if (IGNORED_COLUMN_NAMES.test(str)) return;
+    if (/\b(input|button|element|field|pane|header|scroll)\b/i.test(str) && !/\b(due\s*date|invoice|type|status|amount|date)\b/i.test(str)) return;
     fields.add(str);
   };
 
@@ -102,17 +105,11 @@ export async function POST(
     addCol(step.columnName);
     addCol(step.headerName);
 
-    const target = step.target || {};
-    addCol(target.elementName);
-    addCol(target.friendlyName);
-    addCol(step.elementName);
-
     const targetField = step.extract_column || step.column || step.field ||
-      target.fingerprint?.columnName || step.fingerprint?.columnName ||
-      target.fingerprint?.headerName || step.fingerprint?.headerName ||
-      target.friendlyName || target.elementName || step.elementName;
+      step.target?.fingerprint?.columnName || step.fingerprint?.columnName ||
+      step.target?.fingerprint?.headerName || step.fingerprint?.headerName;
 
-    const fp = target.fingerprint || step.fingerprint;
+    const fp = step.target?.fingerprint || step.fingerprint;
     if (fp) {
       addCol(fp.columnName);
       addCol(fp.headerName);
@@ -120,22 +117,28 @@ export async function POST(
         addCol(fp.attributes['data-column']);
         addCol(fp.attributes['data-field']);
         addCol(fp.attributes['name']);
-        addCol(fp.attributes['id']);
         addCol(fp.attributes['aria-label']);
-        addCol(fp.attributes['placeholder']);
       }
     }
 
     if (Array.isArray(step.options)) {
       step.options.forEach((opt: any) => {
         const text = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.value);
-        if (targetField) addVal(targetField, text);
-        addVal('Type', text);
+        if (targetField && !IGNORED_COLUMN_NAMES.test(targetField)) addVal(targetField, text);
+        if (targetField && /type/i.test(targetField)) addVal('Type', text);
+      });
+    }
+
+    if (Array.isArray(step.selectOptions)) {
+      step.selectOptions.forEach((opt: any) => {
+        const text = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.value);
+        if (targetField && !IGNORED_COLUMN_NAMES.test(targetField)) addVal(targetField, text);
+        if (targetField && /type/i.test(targetField)) addVal('Type', text);
       });
     }
 
     if (step.value && typeof step.value === 'string' && !step.value.startsWith('{{')) {
-      if (targetField) addVal(targetField, step.value);
+      if (targetField && !IGNORED_COLUMN_NAMES.test(targetField)) addVal(targetField, step.value);
     }
   });
 
@@ -146,13 +149,15 @@ export async function POST(
 
   // 5. Default portal fields
   ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'].forEach(addCol);
-  const defaults: Record<string, string[]> = {
-    Type: ['Invoice', 'Bill', 'Statement', 'Credit Note', 'Receipt', 'Payment', 'Order'],
-    Status: ['Open', 'Pending', 'Paid', 'Overdue', 'Unpaid', 'Draft', 'Closed', 'Processing', 'Active'],
-    Priority: ['High', 'Normal', 'Low', 'Urgent'],
+  const fallbackDefaults: Record<string, string[]> = {
+    Type: ['Invoice', 'Credit Memo'],
+    Status: ['Open', 'Pending', 'Paid', 'Closed'],
+    Priority: ['High', 'Normal', 'Low'],
   };
-  Object.entries(defaults).forEach(([col, defVals]) => {
-    defVals.forEach((val) => addVal(col, val));
+  Object.entries(fallbackDefaults).forEach(([col, defVals]) => {
+    if (!fieldValuesMap[col] || fieldValuesMap[col].length === 0) {
+      defVals.forEach((val) => addVal(col, val));
+    }
   });
 
   return NextResponse.json({

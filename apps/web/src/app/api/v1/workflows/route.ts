@@ -71,7 +71,14 @@ export async function GET(request: NextRequest) {
     updated_at: w.updated_at,
     filter_rules: w.filter_rules || {},
     workflow_definition: {
-      steps: Array.isArray(w.steps) ? w.steps : [],
+      steps: Array.isArray(w.steps)
+        ? w.steps.map((s: any) => ({
+            id: s?.id,
+            type: s?.type,
+            action: s?.action || s?.type,
+            target: { elementName: s?.target?.elementName || s?.elementName },
+          }))
+        : [],
       start_url: w.portal_url,
     },
   }));

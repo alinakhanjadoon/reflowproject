@@ -188,22 +188,16 @@ export default function WorkflowsPage() {
 
   // Lazy fetch complete workflow when opening execution preflight modal
   const handleStartRun = useCallback(async (wf: Workflow) => {
-    const def = wf.workflow_definition as Record<string, unknown> | undefined;
-    if (Array.isArray(def?.steps) && def.steps.length > 0) {
-      setPreflightWorkflow(wf);
-      return;
-    }
-
     try {
       const res = await fetch(`/api/v1/workflows?id=${encodeURIComponent(wf.id)}`);
       if (res.ok) {
         const data = await res.json();
-        setPreflightWorkflow(data.workflow || wf);
-        return;
+        if (data.workflow) {
+          setPreflightWorkflow(data.workflow);
+          return;
+        }
       }
-    } catch {
-      // Fallback
-    }
+    } catch {}
     setPreflightWorkflow(wf);
   }, []);
 
@@ -222,9 +216,25 @@ export default function WorkflowsPage() {
     };
   }, [loadData]);
 
-  // Real-time Supabase listener on workflows and active execution runs
+  // Real-time Supabase listener on workflows and active execution runs with debouncing
   useEffect(() => {
     if (!orgId) return;
+
+    let runsTimer: NodeJS.Timeout | null = null;
+    const debouncedLoadRuns = () => {
+      if (runsTimer) clearTimeout(runsTimer);
+      runsTimer = setTimeout(() => {
+        void loadRuns();
+      }, 800);
+    };
+
+    let wfTimer: NodeJS.Timeout | null = null;
+    const debouncedLoadWorkflows = () => {
+      if (wfTimer) clearTimeout(wfTimer);
+      wfTimer = setTimeout(() => {
+        void loadWorkflows();
+      }, 800);
+    };
 
     const supabase = createClient();
     const channel = supabase
@@ -238,7 +248,7 @@ export default function WorkflowsPage() {
           filter: `org_id=eq.${orgId}`,
         },
         () => {
-          void loadWorkflows();
+          debouncedLoadWorkflows();
         }
       )
       .on(
@@ -250,12 +260,14 @@ export default function WorkflowsPage() {
           filter: `org_id=eq.${orgId}`,
         },
         () => {
-          void loadRuns();
+          debouncedLoadRuns();
         }
       )
       .subscribe();
 
     return () => {
+      if (runsTimer) clearTimeout(runsTimer);
+      if (wfTimer) clearTimeout(wfTimer);
       void supabase.removeChannel(channel);
     };
   }, [orgId, loadWorkflows, loadRuns]);

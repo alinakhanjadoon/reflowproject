@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   Workflow as WorkflowIcon,
@@ -86,10 +86,13 @@ export default function DashboardOverviewPage() {
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const isFetchingRef = useRef(false);
 
   // Load and calculate overview metrics
   const loadOverviewData = useCallback(async () => {
     if (!orgId) return;
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       setLoadError(null);
       const supabase = createClient();
@@ -191,6 +194,7 @@ export default function DashboardOverviewPage() {
       console.error('Error loading dashboard overview data:', err);
       setLoadError('We couldn’t load your dashboard data. Please try again.');
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   }, [orgId]);
@@ -210,9 +214,17 @@ export default function DashboardOverviewPage() {
     };
   }, [loadOverviewData]);
 
-  // Realtime subscription on wf_execution_runs
+  // Realtime subscription on wf_execution_runs with debouncing
   useEffect(() => {
     if (!orgId) return;
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const debouncedLoadOverview = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void loadOverviewData();
+      }, 1000);
+    };
 
     const supabase = createClient();
     const channel = supabase
@@ -226,17 +238,18 @@ export default function DashboardOverviewPage() {
           filter: `org_id=eq.${orgId}`
         },
         () => {
-          void loadOverviewData();
+          debouncedLoadOverview();
         }
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       void supabase.removeChannel(channel);
     };
   }, [orgId, loadOverviewData]);
 
-  // Fallback 3s polling when active runs are executing
+  // Fallback 6s polling when active runs are executing
   const hasActiveRuns = useMemo(() => {
     return recentRuns.some((r) => {
       const st = String(r.status).toLowerCase();
@@ -249,7 +262,7 @@ export default function DashboardOverviewPage() {
 
     const interval = setInterval(() => {
       void loadOverviewData();
-    }, 3000);
+    }, 6000);
 
     return () => clearInterval(interval);
   }, [hasActiveRuns, orgId, loadOverviewData]);

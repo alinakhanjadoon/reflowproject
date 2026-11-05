@@ -106,6 +106,7 @@ export default function RunsTelemetryPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const isFetchingRef = useRef(false);
 
   // Keyboard shortcut: Ctrl+K / Cmd+K to focus search input
   useEffect(() => {
@@ -125,6 +126,8 @@ export default function RunsTelemetryPage() {
   const fetchRuns = useCallback(
     async (isSilent = false) => {
       if (!orgId) return;
+      if (isFetchingRef.current) return;
+      isFetchingRef.current = true;
       if (!isSilent) setFetchError(null);
 
       try {
@@ -199,6 +202,7 @@ export default function RunsTelemetryPage() {
           setFetchError(err instanceof Error ? err.message : 'Failed to load execution runs');
         }
       } finally {
+        isFetchingRef.current = false;
         if (!isSilent) {
           setIsLoading(false);
           setIsRefreshingLocal(false);
@@ -223,9 +227,17 @@ export default function RunsTelemetryPage() {
     };
   }, [fetchRuns]);
 
-  // Supabase Realtime channel subscription on wf_execution_runs
+  // Supabase Realtime channel subscription on wf_execution_runs with debouncing
   useEffect(() => {
     if (!orgId) return;
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const debouncedFetchRuns = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void fetchRuns(true);
+      }, 800);
+    };
 
     const supabase = createClient();
     const channel = supabase
@@ -239,17 +251,18 @@ export default function RunsTelemetryPage() {
           filter: `org_id=eq.${orgId}`,
         },
         () => {
-          void fetchRuns(true);
+          debouncedFetchRuns();
         }
       )
       .subscribe();
 
-  return () => {
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       void supabase.removeChannel(channel);
     };
   }, [orgId, fetchRuns]);
 
-  // Fallback 3s interval polling when active runs exist (pending, running, requires_action)
+  // Fallback 6s interval polling when active runs exist (pending, running, requires_action)
   const hasActiveRuns = useMemo(() => {
     return runs.some(
       (r) => r.status === 'pending' || r.status === 'running' || r.status === 'requires_action'
@@ -261,7 +274,7 @@ export default function RunsTelemetryPage() {
 
     const interval = setInterval(() => {
       void fetchRuns(true);
-    }, 3000);
+    }, 6000);
 
     return () => clearInterval(interval);
   }, [hasActiveRuns, orgId, fetchRuns]);

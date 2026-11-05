@@ -269,26 +269,29 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
       // The raw runner token is no longer stored or readable from the browser.
       setRunnerToken(null);
 
-      // Check online status via /api/v1/runners (authenticated by token) or organization metadata
+      // Determine initial online status synchronously from already-fetched organization metadata
       let online = false;
-      try {
-        const res = await fetch(`/api/v1/runners`, {
-          cache: 'no-store',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          online = !!data.is_online;
-        } else if (parsedMeta?.last_ping_at) {
-          const diffSeconds = (Date.now() - new Date(parsedMeta.last_ping_at as string).getTime()) / 1000;
-          online = diffSeconds < 60;
-        }
-      } catch {
-        if (parsedMeta?.last_ping_at) {
-          const diffSeconds = (Date.now() - new Date(parsedMeta.last_ping_at as string).getTime()) / 1000;
-          online = diffSeconds < 60;
-        }
+      if (parsedMeta?.last_ping_at && parsedMeta?.token_revoked !== true) {
+        const diffSeconds = (Date.now() - new Date(parsedMeta.last_ping_at as string).getTime()) / 1000;
+        online = diffSeconds < 60;
       }
       setIsRunnerOnline(online);
+
+      // Immediately unblock the page UI so the user does not stare at a blocking waterfall
+      setLoading(false);
+
+      // Asynchronously refresh online status in background without blocking initial paint
+      void (async () => {
+        try {
+          const res = await fetch(`/api/v1/runners`, {
+            cache: 'no-store',
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setIsRunnerOnline(!!data.is_online);
+          }
+        } catch {}
+      })();
     } catch (err) {
       console.error('Dashboard context error:', err);
     } finally {
@@ -313,7 +316,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
 
     const supabase = createClient();
 
-    // Heartbeat poller for runner status every 5 seconds with direct DB fallback
+    // Heartbeat poller for runner status every 15 seconds (coalesced with Realtime sync)
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/v1/runners`, {
@@ -345,7 +348,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch {}
-    }, 5000);
+    }, 15000);
 
     // Supabase Realtime subscription to organization telemetry updates
     const orgChannel = supabase

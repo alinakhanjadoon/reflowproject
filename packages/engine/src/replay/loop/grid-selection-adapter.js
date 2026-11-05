@@ -136,19 +136,33 @@ class GridSelectionAdapter {
         // 1. ExtJS Component API: select targetIdx on the active/visible grid
         if (window.Ext && window.Ext.ComponentQuery) {
           try {
-            const grids = window.Ext.ComponentQuery.query('grid, gridpanel');
-            const visibleGrids = grids.filter(g => {
-              if (!g.rendered || !g.isVisible || !g.isVisible()) return false;
-              const el = g.getEl && g.getEl().dom;
-              if (!el) return false;
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              return style.display !== 'none' && style.visibility !== 'hidden' &&
-                rect.width > 50 && rect.height > 50 && rect.top > -500 && rect.left > -500;
-            });
+            let targetGrid = null;
+            // Prefer grid inside active visible modal/window
+            const activeModal = document.querySelector('.x-window:not([style*="display: none"]), .modal.show, [role="dialog"]');
+            if (activeModal && window.Ext.getCmp) {
+              const modalCmp = window.Ext.getCmp(activeModal.id);
+              if (modalCmp && typeof modalCmp.down === 'function') {
+                targetGrid = modalCmp.down('grid, gridpanel');
+              }
+            }
 
-            for (const grid of visibleGrids) {
-              const sm = grid.getSelectionModel && grid.getSelectionModel();
+            if (!targetGrid) {
+              const grids = window.Ext.ComponentQuery.query('grid, gridpanel');
+              const visibleGrids = grids.filter(g => {
+                if (!g.rendered || !g.isVisible || !g.isVisible()) return false;
+                const el = g.getEl && g.getEl().dom;
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none' && style.visibility !== 'hidden' &&
+                  rect.width > 50 && rect.height > 50 && rect.top > -500 && rect.left > -500;
+              });
+              // Prefer topmost/active grid (last in component hierarchy)
+              targetGrid = visibleGrids[visibleGrids.length - 1] || visibleGrids[0];
+            }
+
+            if (targetGrid) {
+              const sm = targetGrid.getSelectionModel && targetGrid.getSelectionModel();
               if (sm && typeof sm.select === 'function') {
                 sm.deselectAll();
                 sm.select(targetIdx);

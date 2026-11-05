@@ -33,6 +33,19 @@ class LoopDetector {
     const parentTag = (fingerprint.parentTag || '').toLowerCase();
     const role = (fingerprint.role || '').toLowerCase();
 
+    // 0a. Exclude Navigation and Scroll actions (never a repeating data record anchor)
+    const actionType = String(step.type || step.action || '').toUpperCase();
+    if (actionType === 'SCROLL' || actionType === 'NAVIGATE') {
+      return {
+        isLoopCandidate: false,
+        patternType: 'single-element',
+        role: 'SETUP',
+        originalCssPath: cssPath,
+        fingerprint,
+        description: 'Page scroll or navigation (executed once as setup)'
+      };
+    }
+
     // 0. Exclude Site Chrome, Navigation Toolbars, Tabs, Headers, Footers, and Form Inputs
     if (this.isNavigationOrChrome(cssPath, fingerprint)) {
       return {

@@ -81,7 +81,7 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
     const type = String(s.type || s.action || '').toUpperCase();
     const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toLowerCase();
     const inputType = String(s.target?.fingerprint?.type || s.fingerprint?.type || '').toLowerCase();
-    if (type === 'NAVIGATE') return true;
+    if (type === 'NAVIGATE' || type === 'SCROLL' || /scroll/i.test(name)) return true;
     if (/(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) return true;
     if (tag === 'input' && (inputType === 'password' || inputType === 'email')) return true;
     return false;
