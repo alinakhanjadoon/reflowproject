@@ -62,17 +62,85 @@ function getWorkflowSteps(workflow: Workflow | null): any[] {
   return [];
 }
 
+function detectTwoLevelCandidates(steps: Array<any>): {
+  hasTwoLevel: boolean;
+  dropdownStepIndex: number;
+  tableStepIndex: number;
+} {
+  if (!Array.isArray(steps) || steps.length < 3) {
+    return { hasTwoLevel: false, dropdownStepIndex: -1, tableStepIndex: -1 };
+  }
+
+  const isAuthOrSetup = (s: any) => {
+    if (!s) return false;
+    const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
+    const type = String(s.type || s.action || '').toUpperCase();
+    const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toLowerCase();
+    const inputType = String(s.target?.fingerprint?.type || s.fingerprint?.type || '').toLowerCase();
+    if (type === 'NAVIGATE' || type === 'SCROLL' || /scroll/i.test(name)) return true;
+    if (/(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) return true;
+    if (tag === 'input' && (inputType === 'password' || inputType === 'email')) return true;
+    return false;
+  };
+
+  let dropdownStepIndex = -1;
+  let tableStepIndex = -1;
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (isAuthOrSetup(s)) continue;
+
+    const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
+    const role = (s.target?.fingerprint?.role || '').toLowerCase();
+    const text = (s.name || s.elementName || s.description || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
+    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+    const selectors = candidates.map((c: any) => c.value || '').join(' ');
+
+    const isOptionOrDropdown = Boolean(
+      tag === 'MAT-OPTION' || tag === 'OPTION' || tag === 'LI' ||
+      role === 'option' || role === 'listitem' ||
+      /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|li:nth-child|data-company)\b/i.test(selectors)
+    );
+
+    const isTableRowOrGrid = Boolean(
+      tag === 'TR' || tag === 'TD' ||
+      role === 'row' || role === 'gridcell' ||
+      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors) ||
+      /\b(table\s*row|grid\s*row|invoice\s*row|row\s*item)\b/i.test(text)
+    );
+
+    if (dropdownStepIndex === -1 && isOptionOrDropdown) {
+      dropdownStepIndex = i;
+    }
+    if (isTableRowOrGrid) {
+      tableStepIndex = i;
+    }
+  }
+
+  const hasTwoLevel = dropdownStepIndex >= 0 && tableStepIndex > dropdownStepIndex;
+  return { hasTwoLevel, dropdownStepIndex, tableStepIndex };
+}
+
 function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
   if (!Array.isArray(steps) || steps.length === 0) return 0;
   if (typeof savedIndex === 'number' && Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < steps.length) {
     return savedIndex;
   }
 
+  const twoLevel = detectTwoLevelCandidates(steps);
+
   // 1. Explicit role === 'LOOP' or step marked with loop
   const roleIdx = steps.findIndex(
     (s: any) => s && (s.role === 'LOOP' || s.isLoopCandidate === true || s.isLoop === true || s.loopMode === 'sequential_iteration')
   );
-  if (roleIdx >= 0) return roleIdx;
+  if (roleIdx >= 0) {
+    // If the marked step is a filter dropdown option, but a data table row exists,
+    // prefer the data table row in single-level iteration so records get processed
+    if (twoLevel.hasTwoLevel && roleIdx === twoLevel.dropdownStepIndex) {
+      return twoLevel.tableStepIndex;
+    }
+    return roleIdx;
+  }
 
   // Helper to identify auth, login, setup inputs, and navigation actions
   const isAuthOrSetup = (s: any) => {
@@ -477,17 +545,31 @@ export function ExecutionPreflightModal({
           if (typeof savedNested.inner.endStepIndex === 'number') setInnerEndIndex(savedNested.inner.endStepIndex);
           if (savedNested.inner.maxItems) setInnerMaxItems(String(savedNested.inner.maxItems));
         }
-      } else if (steps.length >= 4) {
+      } else if (steps.length >= 3) {
         // Sensible defaults for two-level workflows:
-        // Outer anchor at step index 1 (e.g. Select Company), inner anchor at bestCandidate (e.g. Select Invoice)
-        const outerCandidate = 1;
-        setOuterAnchorIndex(outerCandidate);
-        setOuterStartIndex(outerCandidate);
-        setOuterEndIndex(steps.length - 1);
-        const innerCandidate = bestCandidate > outerCandidate ? bestCandidate : Math.min(3, steps.length - 1);
-        setInnerAnchorIndex(innerCandidate);
-        setInnerStartIndex(innerCandidate);
-        setInnerEndIndex(Math.max(innerCandidate, steps.length - 2));
+        // Automatically check if both a filter dropdown and table row exist
+        const twoLevel = detectTwoLevelCandidates(steps);
+        if (twoLevel.hasTwoLevel) {
+          const outerCandidate = twoLevel.dropdownStepIndex;
+          const outerStart = Math.max(0, outerCandidate - 1);
+          setOuterAnchorIndex(outerCandidate);
+          setOuterStartIndex(outerStart);
+          setOuterEndIndex(steps.length - 1);
+
+          const innerCandidate = twoLevel.tableStepIndex;
+          setInnerAnchorIndex(innerCandidate);
+          setInnerStartIndex(innerCandidate);
+          setInnerEndIndex(Math.min(steps.length - 1, innerCandidate + 2));
+        } else {
+          const outerCandidate = 1;
+          setOuterAnchorIndex(outerCandidate);
+          setOuterStartIndex(outerCandidate);
+          setOuterEndIndex(steps.length - 1);
+          const innerCandidate = bestCandidate > outerCandidate ? bestCandidate : Math.min(3, steps.length - 1);
+          setInnerAnchorIndex(innerCandidate);
+          setInnerStartIndex(innerCandidate);
+          setInnerEndIndex(Math.max(innerCandidate, steps.length - 2));
+        }
       }
 
       // Restore NEW_ONLY state if configured
@@ -1140,6 +1222,23 @@ export function ExecutionPreflightModal({
 
               {!isTwoLevel ? (
                 <>
+                  {(() => {
+                    const twoLevelInfo = detectTwoLevelCandidates(steps);
+                    if (!twoLevelInfo.hasTwoLevel) return null;
+                    return (
+                      <div className="p-3 bg-cyan-950/30 border border-cyan-800/50 rounded-xl text-xs space-y-1">
+                        <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
+                          <span>💡 Filter Dropdown & Table Records Detected</span>
+                        </div>
+                        <p className="text-slate-300 text-[11px] leading-relaxed">
+                          This portal has a filter option (Step #{twoLevelInfo.dropdownStepIndex + 1}) and data table records (Step #{twoLevelInfo.tableStepIndex + 1}).
+                          In <strong>Single-Loop</strong> mode, ReFlow iterates over the table records.
+                          If you want to cycle through each customer in the dropdown and download their records, toggle on <strong>Controlled Two-Level Iteration</strong> above.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
                   {/* Single-Level Anchor Step Selector */}
                   <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
                     <div className="flex items-center justify-between">

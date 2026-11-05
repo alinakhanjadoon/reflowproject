@@ -95,7 +95,7 @@ class GridSelectionAdapter {
                 sm.deselectAll();
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
 
         // 2. DOM-based deselect: cleanly remove selection classes and attributes
@@ -169,7 +169,7 @@ class GridSelectionAdapter {
                 return;
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
 
         // 2. DOM-based selection for standard HTML tables / ARIA grids:

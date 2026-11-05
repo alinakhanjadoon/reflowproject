@@ -1002,6 +1002,19 @@ class LoopReplayRunner {
         throw new Error(`Outer anchor action not found at step #${nestedConfig.outer.anchorStepIndex + 1}`);
       }
 
+      // If there are pre-anchor steps (e.g. Open Dropdown/Form), execute them first so outer elements exist in DOM
+      if (partition.outerAnchorOffset > 0) {
+        logger.info(`[Two-Level Loop] Executing ${partition.outerAnchorOffset} outer pre-anchor step(s) before discovery...`);
+        for (let pIdx = 0; pIdx < partition.outerAnchorOffset; pIdx++) {
+          const preAnchorStep = partition.outerPreSteps[pIdx];
+          const absStepIdx = nestedConfig.outer.startStepIndex + pIdx;
+          logger.info(`[Two-Level Loop] Pre-anchor step #${absStepIdx + 1}: ${preAnchorStep.name || preAnchorStep.elementName || preAnchorStep.type || 'Action'}`);
+          await this.replayEngine.executeAction(preAnchorStep, absStepIdx);
+          await new Promise(r => setTimeout(r, 800));
+        }
+        await this._settlePageAsync(page, 15000);
+      }
+
       logger.info(`[Two-Level Loop] Discovering outer collection (${nestedConfig.outer.name || 'company'}) targeting anchor step #${nestedConfig.outer.anchorStepIndex + 1}...`);
       const outerDiscovery = await ItemDiscovery.discover(page, outerAnchorStep.target || outerAnchorStep.fingerprint, {
         minItems: 1,
@@ -1058,6 +1071,19 @@ class LoopReplayRunner {
         logger.info(`[Two-Level Loop] >>> [${c + 1}/${outerItems.length}] Processing ${nestedConfig.outer.name || 'Company'}: "${outerLabel}" (ID: ${outerId}) <<<`);
         logger.info(`================================================================================\n`);
         onProgress({ status: 'PROCESSING_OUTER', outerIndex: c, outerTotal: outerItems.length, outerRecord, manifest });
+
+        // If there are pre-anchor steps (e.g. Open Dropdown/Form) and this is c > 0, re-open the container for next company
+        if (partition.outerAnchorOffset > 0 && c > 0) {
+          logger.info(`[Two-Level Loop] Executing ${partition.outerAnchorOffset} outer pre-anchor step(s) to prepare ${nestedConfig.outer.name || 'company'} #${c + 1}...`);
+          for (let pIdx = 0; pIdx < partition.outerAnchorOffset; pIdx++) {
+            const preAnchorStep = partition.outerPreSteps[pIdx];
+            const absStepIdx = nestedConfig.outer.startStepIndex + pIdx;
+            logger.info(`[Two-Level Loop] Pre-anchor step #${absStepIdx + 1}: ${preAnchorStep.name || preAnchorStep.elementName || preAnchorStep.type || 'Action'}`);
+            await this.replayEngine.executeAction(preAnchorStep, absStepIdx);
+            await new Promise(r => setTimeout(r, 800));
+          }
+          await this._settlePageAsync(page, 15000);
+        }
 
         // 3a. Select current company
         const outerItemHandle = await ItemDiscovery.getItemHandle(page, outerDiscovery, outerIdx);
