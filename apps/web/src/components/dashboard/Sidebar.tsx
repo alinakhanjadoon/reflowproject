@@ -132,6 +132,28 @@ export function Sidebar({ isRunnerOnline = false }: SidebarProps) {
       </div>
 
       <div className="border-t border-[var(--border-color,rgba(255,255,255,0.07))] pt-3">
+        {!isCollapsed && (
+          <div className="mb-3 rounded-xl border border-cyan-500/20 bg-[#171f33]/70 p-3 shadow-[0_0_12px_rgba(6,182,212,0.1)] backdrop-blur-md">
+            <div className="flex items-center justify-between">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#2d3449] text-cyan-400">
+                <RobotAvatar size="mini" />
+              </div>
+              <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+                New
+              </span>
+            </div>
+            <div className="mt-2 text-xs font-semibold text-white">Automate Smarter</div>
+            <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">
+              Scale agents and task logic with zero latency.
+            </p>
+            <Link
+              href="/dashboard/getting-started"
+              className="mt-2.5 inline-flex w-full items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 py-1 text-[11px] font-semibold text-white shadow-md hover:opacity-90 transition-opacity"
+            >
+              Get Started
+            </Link>
+          </div>
+        )}
         <button
           type="button"
           onClick={toggleCollapse}

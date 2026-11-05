@@ -1,28 +1,45 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Play, 
-  X, 
-  Layers, 
-  Repeat, 
-  AlertCircle, 
-  CheckCircle, 
-  Cpu, 
-  Settings2, 
-  Globe, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Play,
+  X,
+  Layers,
+  Repeat,
+  AlertCircle,
+  CheckCircle2,
+  Cpu,
+  Settings2,
+  Globe,
   Loader2,
-  ListFilter,
   Plus,
   Trash2,
   RefreshCw,
   Clock,
-  Eye
+  Eye,
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  Sparkles,
+  Download,
+  CheckSquare,
+  FileCode,
+  Filter,
+  Sliders,
+  Info,
+  Calendar,
+  Layers3,
+  Flame,
+  ArrowRight,
+  HelpCircle,
+  Table as TableIcon
 } from 'lucide-react';
 import { Workflow } from '@/lib/types/database';
 import { DrawerRunItem } from './RunDetailsDrawer';
 import { useDashboard } from '@/context/DashboardContext';
 import { deriveLoopSignals } from '@/lib/workflows/loop-signals';
+import { REFLOW_MASCOT_URL, REFLOW_MASCOT_INSPECTING_URL } from './RobotAvatar';
 
 interface ExecutionPreflightModalProps {
   isOpen: boolean;
@@ -129,20 +146,16 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
 
   const twoLevel = detectTwoLevelCandidates(steps);
 
-  // 1. Explicit role === 'LOOP' or step marked with loop
   const roleIdx = steps.findIndex(
     (s: any) => s && (s.role === 'LOOP' || s.isLoopCandidate === true || s.isLoop === true || s.loopMode === 'sequential_iteration')
   );
   if (roleIdx >= 0) {
-    // If the marked step is a filter dropdown option, but a data table row exists,
-    // prefer the data table row in single-level iteration so records get processed
     if (twoLevel.hasTwoLevel && roleIdx === twoLevel.dropdownStepIndex) {
       return twoLevel.tableStepIndex;
     }
     return roleIdx;
   }
 
-  // Helper to identify auth, login, setup inputs, and navigation actions
   const isAuthOrSetup = (s: any) => {
     if (!s) return false;
     const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
@@ -155,57 +168,40 @@ function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
     return false;
   };
 
-  // 2. Step targeting table rows, grid cells, or records (prioritized over all other patterns)
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    if (isAuthOrSetup(s)) continue;
+  const businessSteps = steps.filter((s: any, idx: number) => idx > 0 && !isAuthOrSetup(s));
+  const candidatePool = businessSteps.length > 0 ? businessSteps : steps;
 
-    const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
-    const role = (s.target?.fingerprint?.role || '').toLowerCase();
-    const text = (s.name || s.elementName || s.description || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
+  for (const s of candidatePool) {
     const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
     const selectors = candidates.map((c: any) => c.value || '').join(' ');
-
-    const isTableRowOrGrid = Boolean(
-      tag === 'TR' ||
-      tag === 'TD' ||
-      role === 'row' ||
-      role === 'gridcell' ||
-      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors) ||
-      /\b(table\s*row|grid\s*row|invoice\s*row|row\s*item)\b/i.test(text)
-    );
-
-    if (isTableRowOrGrid) return i;
-  }
-
-  // 3. Dropdown options or list items
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    if (isAuthOrSetup(s)) continue;
-
     const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
     const role = (s.target?.fingerprint?.role || '').toLowerCase();
-    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
-    const selectors = candidates.map((c: any) => c.value || '').join(' ');
 
-    const isOptionOrListItem = Boolean(
-      tag === 'MAT-OPTION' || tag === 'OPTION' || tag === 'LI' ||
-      role === 'option' || role === 'listitem' ||
-      /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|li:nth-child)\b/i.test(selectors)
+    const isTable = Boolean(
+      tag === 'TR' || tag === 'TD' ||
+      role === 'row' || role === 'gridcell' ||
+      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors)
     );
-
-    if (isOptionOrListItem) return i;
+    if (isTable) {
+      const idx = steps.indexOf(s);
+      if (idx >= 0) return idx;
+    }
   }
 
-  // 4. Fallback: find the first non-login non-setup business action
-  const nonLoginIdx = steps.findIndex((s: any, idx: number) => {
-    if (idx === 0) return false;
-    return !isAuthOrSetup(s);
-  });
+  const nonLoginIdx = steps.findIndex((s: any, idx: number) => idx > 0 && !isAuthOrSetup(s));
   if (nonLoginIdx >= 0) return nonLoginIdx;
 
-  if (steps.length > 1) return 1;
-  return 0;
+  return steps.length > 1 ? 1 : 0;
+}
+
+const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/i;
+
+function cleanStringValue(val: unknown): string {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim();
+  if (EXPANDER_GLYPH_REGEX.test(str)) return '';
+  str = str.replace(/^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+/, '').trim();
+  return str;
 }
 
 function extractWorkflowColumns(workflow: Workflow | null): string[] {
@@ -223,14 +219,12 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     str = str.replace(/^(click|select|enter|type|open|download|view|press)\s+/i, '').trim();
     if (!str || str.length > 50) return;
     if (IGNORED_COLUMN_NAMES.test(str)) return;
-    // Exclude action buttons, input fields, interactive control names, and document ID tokens from table column list
     if (/\b(button|link|input|field|element)\b/i.test(str) && !/^(Invoice|Payment|Customer|Company|Date)\s+Field$/i.test(str)) return;
     if (/^(open selected|export a report|save it to the disk)/i.test(str)) return;
     if (/^[A-Z]{2,4}-\d+/i.test(str)) return;
     fields.add(str);
   };
 
-  // 1. From workflow filter_rules (Highest priority: actual captured table headers)
   const fr = (workflow.filter_rules || {}) as Record<string, unknown>;
   if (Array.isArray(fr.available_fields)) fr.available_fields.forEach(addCleanCol);
   if (Array.isArray(fr.columns)) fr.columns.forEach(addCleanCol);
@@ -238,7 +232,6 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     Object.keys(fr.fieldValues).forEach(addCleanCol);
   }
 
-  // 2. From workflow_definition
   const wd = (workflow.workflow_definition || {}) as Record<string, unknown>;
   if (Array.isArray(wd.available_fields)) wd.available_fields.forEach(addCleanCol);
   if (Array.isArray(wd.columns)) wd.columns.forEach(addCleanCol);
@@ -249,7 +242,6 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     Object.keys(wdFr.fieldValues).forEach(addCleanCol);
   }
 
-  // 3. From table context in recorded steps
   const steps = getWorkflowSteps(workflow);
   steps.forEach((step: any) => {
     if (!step) return;
@@ -277,35 +269,11 @@ function extractWorkflowColumns(workflow: Workflow | null): string[] {
     }
   });
 
-  // If table columns were captured, return them cleanly
   if (fields.size > 0) {
     return Array.from(fields);
   }
 
-  // Fallback common table fields only if no columns were discovered
-  const commonFields = ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'];
-  commonFields.forEach(addCleanCol);
-
-  return Array.from(fields);
-}
-
-const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/i;
-
-function cleanStringValue(val: unknown): string {
-  if (val === null || val === undefined) return '';
-  let str = String(val).trim();
-  if (EXPANDER_GLYPH_REGEX.test(str)) return '';
-  str = str.replace(/^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+/, '').trim();
-  return str;
-}
-
-function isDateField(fieldName: string): boolean {
-  if (!fieldName) return false;
-  return /date|due|created|posted|time|expire|billing/i.test(fieldName.trim());
-}
-
-function getTodayIsoDate(): string {
-  return new Date().toISOString().split('T')[0];
+  return ['Type', 'Status', 'Invoice Number', 'Due Date', 'Amount'];
 }
 
 function extractFieldValuesMap(workflow: Workflow | null): Record<string, string[]> {
@@ -321,41 +289,17 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
     result[fKey].add(cleaned);
   };
 
-  // 1. From workflow filter_rules
   if (workflow?.filter_rules && typeof workflow.filter_rules === 'object') {
     const fr = workflow.filter_rules as any;
     if (fr.fieldValues && typeof fr.fieldValues === 'object') {
       Object.entries(fr.fieldValues).forEach(([k, vals]) => {
-        if (Array.isArray(vals)) {
-          vals.forEach((v) => addValue(k, v));
-        }
+        if (Array.isArray(vals)) vals.forEach((v) => addValue(k, v));
       });
     }
     const savedFilter = fr.itemFilter || fr;
     if (Array.isArray(savedFilter.conditions)) {
       savedFilter.conditions.forEach((c: any) => {
-        if (c.field && c.value && typeof c.value === 'string') {
-          addValue(c.field, c.value);
-        }
-      });
-    }
-  }
-
-  // 2. From workflow_definition and steps
-  if (workflow?.workflow_definition && typeof workflow.workflow_definition === 'object') {
-    const wd = workflow.workflow_definition as any;
-    if (wd.fieldValues && typeof wd.fieldValues === 'object') {
-      Object.entries(wd.fieldValues).forEach(([k, vals]) => {
-        if (Array.isArray(vals)) {
-          vals.forEach((v) => addValue(k, v));
-        }
-      });
-    }
-    if (wd.filter_rules?.fieldValues && typeof wd.filter_rules.fieldValues === 'object') {
-      Object.entries(wd.filter_rules.fieldValues).forEach(([k, vals]) => {
-        if (Array.isArray(vals)) {
-          vals.forEach((v) => addValue(k, v));
-        }
+        if (c.field && c.value && typeof c.value === 'string') addValue(c.field, c.value);
       });
     }
   }
@@ -365,22 +309,7 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
     if (!step) return;
     const targetField = step.extract_column || step.column || step.field ||
       step.target?.fingerprint?.columnName || step.fingerprint?.columnName ||
-      step.target?.fingerprint?.headerName || step.fingerprint?.headerName ||
-      step.context?.table?.activeColumn ||
-      step.target?.friendlyName || step.target?.elementName || step.elementName;
-
-    if (step.context) {
-      if (step.context.fieldValues && typeof step.context.fieldValues === 'object') {
-        Object.entries(step.context.fieldValues).forEach(([k, vals]) => {
-          if (Array.isArray(vals)) vals.forEach((v) => addValue(k, v));
-        });
-      }
-      if (step.context.table?.rowValues && typeof step.context.table.rowValues === 'object') {
-        Object.entries(step.context.table.rowValues).forEach(([k, vals]) => {
-          if (Array.isArray(vals)) vals.forEach((v) => addValue(k, v));
-        });
-      }
-    }
+      step.target?.fingerprint?.headerName || step.fingerprint?.headerName;
 
     if (Array.isArray(step.options)) {
       step.options.forEach((opt: any) => {
@@ -389,31 +318,12 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
         if (targetField && /type/i.test(targetField)) addValue('Type', text);
       });
     }
-    if (Array.isArray(step.selectOptions)) {
-      step.selectOptions.forEach((opt: any) => {
-        const text = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.value);
-        if (targetField) addValue(targetField, text);
-        if (targetField && /type/i.test(targetField)) addValue('Type', text);
-      });
-    }
 
     if (step.value && typeof step.value === 'string' && !step.value.startsWith('{{')) {
       if (targetField) addValue(targetField, step.value);
-      if (/SI-|INV-|DR-|TX-|CM-|\b\d{4,10}\b/i.test(step.value)) {
-        addValue('Invoice Number', step.value);
-      }
-    }
-
-    const fpText = step.target?.fingerprint?.text || step.fingerprint?.text;
-    if (fpText && typeof fpText === 'string' && fpText.length < 50) {
-      if (targetField) addValue(targetField, fpText);
-      if (/SI-|INV-|DR-|TX-|CM-|\b\d{4,10}\b/i.test(fpText)) {
-        addValue('Invoice Number', fpText);
-      }
     }
   });
 
-  // 3. Sensible fallback defaults ONLY when column has no extracted values
   const fallbackDefaults: Record<string, string[]> = {
     Type: ['Invoice', 'Credit Memo'],
     Status: ['Open', 'Pending', 'Paid', 'Closed'],
@@ -421,7 +331,6 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
   };
 
   Object.entries(fallbackDefaults).forEach(([col, defVals]) => {
-    // Only apply defaults if result has no values for this column
     if (!result[col] || result[col].size === 0) {
       defVals.forEach((val) => addValue(col, val));
     }
@@ -448,581 +357,194 @@ export function ExecutionPreflightModal({
   onRunDispatched
 }: ExecutionPreflightModalProps) {
   const { orgId, isRunnerOnline, refreshDashboard, openRunDetails } = useDashboard();
-  const [execMode, setExecMode] = useState<'single' | 'loop'>('single');
-  const [maxItems, setMaxItems] = useState<string>('');
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Simple-loop configuration state (anchor, start, end)
-  const [anchorStepIndex, setAnchorStepIndex] = useState<number>(0);
-  const [startStepIndex, setStartStepIndex] = useState<number>(0);
-  const [endStepIndex, setEndStepIndex] = useState<number>(0);
-  const [loopStepIndex, setLoopStepIndex] = useState<number>(0);
-  const [autoDetectedIndex, setAutoDetectedIndex] = useState<number>(0);
+  // Wizard Step Tracker: 1 = Mode, 2 = Collection & Actions, 3 = Records & Filters, 4 = Review & Launch
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
-  // Two-level (nested) loop state: Company (Outer) -> Record/Invoice (Inner)
-  const [isTwoLevel, setIsTwoLevel] = useState<boolean>(false);
-  const [outerAnchorIndex, setOuterAnchorIndex] = useState<number>(0);
-  const [outerStartIndex, setOuterStartIndex] = useState<number>(0);
-  const [outerEndIndex, setOuterEndIndex] = useState<number>(0);
-  const [outerMaxItems, setOuterMaxItems] = useState<string>('');
-  const [innerAnchorIndex, setInnerAnchorIndex] = useState<number>(0);
-  const [innerStartIndex, setInnerStartIndex] = useState<number>(0);
-  const [innerEndIndex, setInnerEndIndex] = useState<number>(0);
-  const [innerMaxItems, setInnerMaxItems] = useState<string>('');
-  const [newOnly, setNewOnly] = useState<boolean>(false);
+  // Core execution configuration
+  const [execMode, setExecMode] = useState<'standard' | 'loop'>('standard');
+  const [newOnly, setNewOnly] = useState(false);
+  const [recordScope, setRecordScope] = useState<'all' | 'new' | 'custom'>('all');
+  const [targetAction, setTargetAction] = useState<'download' | 'select' | 'process'>('download');
+  const [selectedCollection, setSelectedCollection] = useState<string>('primary_table');
 
-  // Discovered records preview state
-  const [discoveredRecords, setDiscoveredRecords] = useState<Array<any>>([]);
-  const [discoveredCollectionType, setDiscoveredCollectionType] = useState<string>('table-row');
-  const [discoveredItemCount, setDiscoveredItemCount] = useState<number>(0);
-
-  // Filter rules state
-  const [filterEnabled, setFilterEnabled] = useState<boolean>(false);
-  const [matchMode, setMatchMode] = useState<'all' | 'any'>('all');
-  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
-  const [fieldValuesMap, setFieldValuesMap] = useState<Record<string, string[]>>({});
-  const [activeField, setActiveField] = useState<string>('Type');
-  const [scanningColumns, setScanningColumns] = useState<boolean>(false);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
-  const [conditions, setConditions] = useState<FilterConditionRow[]>([
+  // Filter configuration
+  const [filterConditions, setFilterConditions] = useState<FilterConditionRow[]>([
     {
-      id: 'c_initial',
+      id: 'cond_1',
       field: 'Type',
       customField: '',
       operator: 'contains',
-      value: '',
+      value: 'Invoice',
       dateFrom: '',
-      dateTo: '',
+      dateTo: ''
     }
   ]);
+  const [matchMode, setMatchMode] = useState<'all' | 'any'>('all');
 
+  // Advanced settings & bounds
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [maxItems, setMaxItems] = useState<string>('');
+  const [anchorStepIndex, setAnchorStepIndex] = useState<number>(0);
+  const [startStepIndex, setStartStepIndex] = useState<number>(0);
+  const [endStepIndex, setEndStepIndex] = useState<number>(0);
+
+  // Two-Level Iteration (Company + Record)
+  const [isTwoLevel, setIsTwoLevel] = useState<boolean>(false);
+  const [outerAnchorIndex, setOuterAnchorIndex] = useState<number>(0);
+  const [innerAnchorIndex, setInnerAnchorIndex] = useState<number>(0);
+  const [outerStartIndex, setOuterStartIndex] = useState<number>(0);
+  const [outerEndIndex, setOuterEndIndex] = useState<number>(0);
+  const [innerStartIndex, setInnerStartIndex] = useState<number>(0);
+  const [innerEndIndex, setInnerEndIndex] = useState<number>(0);
+  const [outerMaxItems, setOuterMaxItems] = useState<string>('');
+  const [innerMaxItems, setInnerMaxItems] = useState<string>('');
+
+  // Scan & Column metadata
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
+  const [fieldValuesMap, setFieldValuesMap] = useState<Record<string, string[]>>({});
+  const [discoveredRecords, setDiscoveredRecords] = useState<any[]>([]);
+  const [discoveredItemCount, setDiscoveredItemCount] = useState<number>(0);
+  const [scanningColumns, setScanningColumns] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Extract workflow steps
+  const steps = useMemo(() => getWorkflowSteps(workflow), [workflow]);
+
+  // Initialize settings when workflow opens
   useEffect(() => {
-    if (workflow) {
-      const steps = getWorkflowSteps(workflow);
-      // Shared derivation: this is what keeps "recorded as loop" from silently
-      // running as a single pass (recorder metadata + extraction steps +
-      // per-step flags all feed the same answer).
-      const loopSignals = deriveLoopSignals(workflow.workflow_definition, steps);
-      const isConfiguredAsLoop = Boolean(
-        loopSignals.isLoop ||
-        (workflow as any).isLoop === true ||
-        (workflow as any).mode === 'loop'
-      );
-      if (isConfiguredAsLoop) {
-        setExecMode('loop');
-      }
+    if (!isOpen || !workflow) return;
 
-      const savedLoop = loopSignals.loop;
-      const savedLoopIdx = savedLoop?.anchorStepIndex ?? loopSignals.loopStepIndex ?? (workflow as any).loopStepIndex;
-      const bestCandidate = detectLoopCandidate(steps, savedLoopIdx);
-      setAutoDetectedIndex(bestCandidate);
+    setCurrentStep(1);
+    setError(null);
 
-      const anchor = savedLoop?.anchorStepIndex ?? bestCandidate;
-      const start = savedLoop?.startStepIndex ?? anchor;
-      const end = savedLoop?.endStepIndex ?? (steps.length > 0 ? steps.length - 1 : start);
+    const initialColumns = extractWorkflowColumns(workflow);
+    setAvailableColumns(initialColumns);
 
-      setAnchorStepIndex(anchor);
-      setStartStepIndex(start);
-      setEndStepIndex(end);
-      setLoopStepIndex(anchor);
+    const valuesMap = extractFieldValuesMap(workflow);
+    setFieldValuesMap(valuesMap);
 
-      // Detect or restore two-level (nested) loop configuration
-      const savedNested = (workflow.workflow_definition as any)?.nestedLoop ||
-                          (workflow.workflow_definition as any)?.itemFilter?.nestedLoop ||
-                          ((workflow.filter_rules as any)?.itemFilter?.nestedLoop);
-      if (savedNested && savedNested.enabled) {
-        setIsTwoLevel(true);
-        if (savedNested.outer) {
-          if (typeof savedNested.outer.anchorStepIndex === 'number') setOuterAnchorIndex(savedNested.outer.anchorStepIndex);
-          if (typeof savedNested.outer.startStepIndex === 'number') setOuterStartIndex(savedNested.outer.startStepIndex);
-          if (typeof savedNested.outer.endStepIndex === 'number') setOuterEndIndex(savedNested.outer.endStepIndex);
-          if (savedNested.outer.maxItems) setOuterMaxItems(String(savedNested.outer.maxItems));
-        }
-        if (savedNested.inner) {
-          if (typeof savedNested.inner.anchorStepIndex === 'number') setInnerAnchorIndex(savedNested.inner.anchorStepIndex);
-          if (typeof savedNested.inner.startStepIndex === 'number') setInnerStartIndex(savedNested.inner.startStepIndex);
-          if (typeof savedNested.inner.endStepIndex === 'number') setInnerEndIndex(savedNested.inner.endStepIndex);
-          if (savedNested.inner.maxItems) setInnerMaxItems(String(savedNested.inner.maxItems));
-        }
-      } else if (steps.length >= 3) {
-        // Sensible defaults for two-level workflows:
-        // Automatically check if both a filter dropdown and table row exist
-        const twoLevel = detectTwoLevelCandidates(steps);
-        if (twoLevel.hasTwoLevel) {
-          const outerCandidate = twoLevel.dropdownStepIndex;
-          const outerStart = Math.max(0, outerCandidate - 1);
-          setOuterAnchorIndex(outerCandidate);
-          setOuterStartIndex(outerStart);
-          setOuterEndIndex(steps.length - 1);
+    const wd = (workflow.workflow_definition || {}) as Record<string, unknown>;
+    const twoLevelCand = detectTwoLevelCandidates(steps);
 
-          const innerCandidate = twoLevel.tableStepIndex;
-          setInnerAnchorIndex(innerCandidate);
-          setInnerStartIndex(innerCandidate);
-          setInnerEndIndex(Math.min(steps.length - 1, innerCandidate + 2));
-        } else {
-          const outerCandidate = 1;
-          setOuterAnchorIndex(outerCandidate);
-          setOuterStartIndex(outerCandidate);
-          setOuterEndIndex(steps.length - 1);
-          const innerCandidate = bestCandidate > outerCandidate ? bestCandidate : Math.min(3, steps.length - 1);
-          setInnerAnchorIndex(innerCandidate);
-          setInnerStartIndex(innerCandidate);
-          setInnerEndIndex(Math.max(innerCandidate, steps.length - 2));
-        }
-      }
+    // Check shared loop signal
+    const signals = deriveLoopSignals(wd);
+    const hasLoopSignal = signals.isLoop;
 
-      // Restore NEW_ONLY state if configured
-      const savedNewOnly = (workflow.workflow_definition as any)?.newOnly ??
-                           (workflow.workflow_definition as any)?.itemFilter?.newOnly ??
-                           ((workflow.filter_rules as any)?.itemFilter?.newOnly);
-      if (typeof savedNewOnly === 'boolean') {
-        setNewOnly(savedNewOnly);
-      }
-
-      const cols = extractWorkflowColumns(workflow);
-      setAvailableColumns(cols);
-
-      const valMap = extractFieldValuesMap(workflow);
-      setFieldValuesMap(valMap);
-
-      // Check if workflow has saved filter rules or captured columns/values
-      const fr = (workflow.filter_rules && Object.keys(workflow.filter_rules).length > 0
-        ? workflow.filter_rules
-        : ((workflow.workflow_definition as any)?.filter_rules || {})) as any;
-      const savedFilter = (fr.itemFilter || fr) as any;
-      const hasConditions = Array.isArray(savedFilter.conditions) && savedFilter.conditions.length > 0;
-      const hasCapturedRules = (Array.isArray(fr.available_fields) && fr.available_fields.length > 0) ||
-        (Array.isArray(fr.columns) && fr.columns.length > 0) ||
-        (fr.fieldValues && Object.keys(fr.fieldValues).length > 0);
-
-      if (hasConditions) {
-        setFilterEnabled(true);
-        setMatchMode(savedFilter.matchMode === 'any' ? 'any' : 'all');
-        const restored = savedFilter.conditions.map((c: any, i: number) => {
-          const isDate = c.operator === 'dateBetween';
-          const isKnown = cols.includes(c.field);
-          return {
-            id: `c_saved_${i}`,
-            field: isKnown ? c.field : '__custom__',
-            customField: isKnown ? '' : (c.field || ''),
-            operator: (c.operator === 'dateBetween' ? 'dateBetween' : (c.operator === 'equals' ? 'equals' : 'contains')) as 'contains' | 'equals' | 'dateBetween',
-            value: isDate ? '' : (typeof c.value === 'string' ? c.value : ''),
-            dateFrom: isDate && typeof c.value === 'object' && c.value ? (c.value.from || '') : '',
-            dateTo: isDate && typeof c.value === 'object' && c.value ? (c.value.to || '') : '',
-          };
-        });
-        setConditions(restored);
-        if (restored[0]) {
-          setActiveField(restored[0].field === '__custom__' ? restored[0].customField : restored[0].field);
-        }
-      } else {
-        const firstCol = cols[0] || 'Type';
-        setActiveField(firstCol);
-        setConditions([
-          {
-            id: 'c_initial',
-            field: firstCol,
-            customField: '',
-            operator: 'contains',
-            value: '',
-            dateFrom: '',
-            dateTo: '',
-          }
-        ]);
-        setFilterEnabled(hasCapturedRules);
-      }
+    if (hasLoopSignal || twoLevelCand.hasTwoLevel) {
+      setExecMode('loop');
+    } else {
+      setExecMode('standard');
     }
-  }, [workflow, isOpen]);
 
-  if (!isOpen || !workflow) return null;
+    const detectedAnchor = detectLoopCandidate(steps);
+    setAnchorStepIndex(detectedAnchor);
+    setStartStepIndex(detectedAnchor);
+    setEndStepIndex(steps.length > 0 ? steps.length - 1 : 0);
 
-  const domain = formatDomain(workflow.portal_url);
-  const steps = getWorkflowSteps(workflow);
-  const stepCount = steps.length;
+    if (twoLevelCand.hasTwoLevel) {
+      setIsTwoLevel(true);
+      setOuterAnchorIndex(twoLevelCand.dropdownStepIndex);
+      setOuterStartIndex(twoLevelCand.dropdownStepIndex);
+      setOuterEndIndex(steps.length > 0 ? steps.length - 1 : 0);
+      setInnerAnchorIndex(twoLevelCand.tableStepIndex);
+      setInnerStartIndex(twoLevelCand.tableStepIndex);
+      setInnerEndIndex(Math.max(twoLevelCand.tableStepIndex, steps.length - 1));
+    }
 
+    // Set initial filter condition from discovered values
+    if (initialColumns.length > 0) {
+      const firstCol = initialColumns[0];
+      const sampleVal = valuesMap[firstCol]?.[0] || 'Invoice';
+      setFilterConditions([
+        {
+          id: 'cond_1',
+          field: firstCol,
+          customField: '',
+          operator: 'contains',
+          value: sampleVal,
+          dateFrom: '',
+          dateTo: ''
+        }
+      ]);
+    }
+  }, [isOpen, workflow, steps]);
+
+  // Keep newOnly state in sync with recordScope
+  useEffect(() => {
+    if (recordScope === 'new') {
+      setNewOnly(true);
+    } else {
+      setNewOnly(false);
+    }
+  }, [recordScope]);
+
+  // Live filter condition manipulation
   const handleAddCondition = () => {
     const defaultField = availableColumns[0] || 'Type';
-    setConditions((prev) => [
+    const sampleVal = fieldValuesMap[defaultField]?.[0] || '';
+    setFilterConditions((prev) => [
       ...prev,
       {
-        id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: `cond_${Date.now()}`,
         field: defaultField,
         customField: '',
         operator: 'contains',
-        value: '',
+        value: sampleVal,
         dateFrom: '',
-        dateTo: '',
+        dateTo: ''
       }
     ]);
   };
 
-  const handleRemoveCondition = (index: number) => {
-    setConditions((prev) => prev.filter((_, idx) => idx !== index));
+  const handleRemoveCondition = (id: string) => {
+    setFilterConditions((prev) => (prev.length > 1 ? prev.filter((c) => c.id !== id) : prev));
   };
 
-  const handleUpdateCondition = (index: number, updates: Partial<FilterConditionRow>) => {
-    setConditions((prev) => prev.map((c, idx) => (idx === index ? { ...c, ...updates } : c)));
-  };
-
-  const getValuesForField = (fieldName: string): string[] => {
-    if (!fieldName) return [];
-    const norm = fieldName.trim().toLowerCase();
-    for (const [k, vals] of Object.entries(fieldValuesMap)) {
-      if (k.trim().toLowerCase() === norm) {
-        return vals;
-      }
-    }
-    return [];
-  };
-
-  const handleSelectColumnPill = (col: string) => {
-    setActiveField(col);
-    if (conditions.length > 0) {
-      if (col === '__custom__') {
-        handleUpdateCondition(0, { field: '__custom__' });
-      } else {
-        handleUpdateCondition(0, { field: col, customField: '' });
-      }
-    }
-  };
-
-  const handleSelectValuePill = (val: string) => {
-    if (val === '__all__') {
-      if (conditions.length > 0) {
-        handleUpdateCondition(0, { value: '' });
-      }
-      return;
-    }
-    if (conditions.length > 0) {
-      handleUpdateCondition(0, { value: val });
-    }
-  };
-
-  const applyDatePreset = (preset: 'overdue' | 'upcoming' | 'today') => {
-    const todayIso = getTodayIsoDate();
-    if (preset === 'overdue') {
-      handleUpdateCondition(0, {
-        operator: 'dateBetween',
-        dateFrom: '',
-        dateTo: todayIso,
-      });
-    } else if (preset === 'upcoming') {
-      handleUpdateCondition(0, {
-        operator: 'dateBetween',
-        dateFrom: todayIso,
-        dateTo: '2099-12-31',
-      });
-    } else if (preset === 'today') {
-      handleUpdateCondition(0, {
-        operator: 'dateBetween',
-        dateFrom: todayIso,
-        dateTo: todayIso,
-      });
-    }
-  };
-
-  const doesRecordMatchFilter = (
-    recordFields: Record<string, any>,
-    rules: FilterConditionRow[],
-    mode: 'all' | 'any'
-  ): { matches: boolean } => {
-    if (!rules || rules.length === 0) return { matches: true };
-    const results: boolean[] = [];
-
-    for (const c of rules) {
-      const isCustom = c.field === '__custom__';
-      const fieldName = (isCustom ? c.customField : c.field).trim();
-      if (!fieldName) continue;
-
-      let rawVal: any = undefined;
-      for (const [k, v] of Object.entries(recordFields)) {
-        if (k.toLowerCase() === fieldName.toLowerCase()) {
-          rawVal = v;
-          break;
-        }
-      }
-
-      if (rawVal === undefined || rawVal === null || rawVal === '') {
-        results.push(false);
-        continue;
-      }
-
-      const strVal = String(rawVal).trim();
-      if (c.operator === 'dateBetween') {
-        const from = (c.dateFrom || '').trim();
-        const to = (c.dateTo || '').trim();
-        const d = strVal.slice(0, 10);
-        let ok = true;
-        if (from && d < from) ok = false;
-        if (to && d > to) ok = false;
-        results.push(ok);
-      } else if (c.operator === 'equals') {
-        results.push(strVal.toLowerCase() === (c.value || '').trim().toLowerCase());
-      } else {
-        results.push(strVal.toLowerCase().includes((c.value || '').trim().toLowerCase()));
-      }
-    }
-
-    if (results.length === 0) return { matches: true };
-    return { matches: mode === 'any' ? results.some(Boolean) : results.every(Boolean) };
-  };
-
-  const handleRefreshFields = async (targetWorkflow?: Workflow | null, overrideAnchorIdx?: number) => {
-    const wf = targetWorkflow || workflow;
-    const effectiveAnchor = Number.isInteger(overrideAnchorIdx) ? overrideAnchorIdx : anchorStepIndex;
-    setScanningColumns(true);
-    setScanMessage(null);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-      // 1. Try dedicated live discovery endpoint on local desktop worker bridge
-      let res = await fetch('http://127.0.0.1:49152/discover', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          workflow: wf,
-          loopStepIndex: effectiveAnchor,
-          anchorStepIndex: effectiveAnchor,
-          url: wf?.portal_url
-        })
-      }).catch(() => null);
-
-      if (!res || !res.ok) {
-        res = await fetch('http://127.0.0.1:49152/api/discover', {
-          method: 'POST',
-          signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            workflow: wf,
-            loopStepIndex: effectiveAnchor,
-            anchorStepIndex: effectiveAnchor,
-            url: wf?.portal_url
-          })
-        }).catch(() => null);
-      }
-
-      if (!res || !res.ok) {
-        res = await fetch('http://127.0.0.1:49152/record/status', {
-          signal: controller.signal,
-          headers: { Accept: 'application/json' },
-        }).catch(() => null);
-      }
-
-      if (!res || !res.ok) {
-        if (wf?.id) {
-          res = await fetch(`/api/v1/workflows/${wf.id}/discover`, {
-            method: 'POST',
-            signal: controller.signal,
-            headers: { 'Content-Type': 'application/json' },
-          }).catch(() => null);
-        }
-      }
-      clearTimeout(timeoutId);
-
-      if (res && res.ok) {
-        const data = await res.json().catch(() => null);
-        const discovered = new Set<string>();
-        const nextValMap: Record<string, string[]> = {};
-        const appendVal = (col: string, val: unknown) => {
-          const clean = cleanStringValue(val);
-          if (!clean) return;
-          const k = col.trim();
-          if (!nextValMap[k]) nextValMap[k] = [];
-          if (!nextValMap[k].includes(clean)) {
-            nextValMap[k] = [...nextValMap[k], clean].slice(0, 30);
-          }
-        };
-
-        if (data) {
-          if (Array.isArray(data.items)) {
-            setDiscoveredRecords(data.items);
-          }
-          if (data.itemCount !== undefined && data.itemCount !== null) {
-            setDiscoveredItemCount(Number(data.itemCount) || 0);
-          }
-          if (data.collectionType) {
-            setDiscoveredCollectionType(data.collectionType);
-          }
-          if (Array.isArray(data.availableFields)) {
-            data.availableFields.forEach((f: any) => { if (typeof f === 'string' && f.trim()) discovered.add(f.trim()); });
-          }
-          if (Array.isArray(data.columns)) {
-            data.columns.forEach((c: any) => { if (typeof c === 'string' && c.trim()) discovered.add(c.trim()); });
-          }
-          if (data.fieldValues && typeof data.fieldValues === 'object') {
-            Object.entries(data.fieldValues).forEach(([k, vals]) => {
-              if (Array.isArray(vals)) {
-                vals.forEach((v) => appendVal(k, v));
-              }
-            });
-          }
-          if (Array.isArray(data.items)) {
-            data.items.forEach((item: any) => {
-              if (item && typeof item === 'object') {
-                const itemFields = item.fields || item;
-                Object.entries(itemFields).forEach(([k, v]) => {
-                  if (typeof k === 'string' && !k.startsWith('_')) {
-                    discovered.add(k.trim());
-                    appendVal(k.trim(), v);
-                  }
-                });
-              }
-            });
-          }
-          if (Array.isArray(data.actions)) {
-            data.actions.forEach((a: any) => {
-              if (a.extract_column) discovered.add(String(a.extract_column).trim());
-              if (a.column) discovered.add(String(a.column).trim());
-              const fp = a.target?.fingerprint || a.fingerprint;
-              if (fp?.columnName) discovered.add(String(fp.columnName).trim());
-              if (fp?.headerName) discovered.add(String(fp.headerName).trim());
-            });
+  const handleUpdateCondition = (id: string, updates: Partial<FilterConditionRow>) => {
+    setFilterConditions((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const next = { ...c, ...updates };
+        if (updates.field && updates.field !== '__custom__') {
+          const vals = fieldValuesMap[updates.field];
+          if (vals && vals.length > 0 && !updates.value) {
+            next.value = vals[0];
           }
         }
-
-        setAvailableColumns((prev) => {
-          const merged = new Set([...prev, ...discovered]);
-          return Array.from(merged);
-        });
-
-        setFieldValuesMap((prev) => {
-          const merged: Record<string, string[]> = { ...prev };
-          Object.entries(nextValMap).forEach(([col, vals]) => {
-            if (Array.isArray(vals) && vals.length > 0) {
-              // Real scanned values from the live page take precedence over defaults
-              merged[col] = vals.slice(0, 30);
-            } else if (!merged[col]) {
-              merged[col] = vals;
-            }
-          });
-          return merged;
-        });
-
-        const liveCount = data?.itemCount ? ` (${data.itemCount} items on page)` : '';
-        setScanMessage(`Discovered ${discovered.size} column(s) from live page${liveCount}`);
-      } else {
-        setScanMessage('Worker bridge idle; using recorded workflow columns');
-      }
-    } catch {
-      setScanMessage('Worker bridge unavailable; using recorded workflow columns');
-    } finally {
-      setScanningColumns(false);
-      setTimeout(() => setScanMessage(null), 3500);
-    }
+        return next;
+      })
+    );
   };
 
-  let loopValidationError: string | null = null;
-  if (execMode === 'loop' && steps.length > 0) {
-    if (isTwoLevel) {
-      if (outerStartIndex > outerEndIndex) {
-        loopValidationError = `Company start step (#${outerStartIndex + 1}) cannot be after company return step (#${outerEndIndex + 1}).`;
-      } else if (outerAnchorIndex < outerStartIndex || outerAnchorIndex > outerEndIndex) {
-        loopValidationError = `Company anchor step (#${outerAnchorIndex + 1}) must be inside company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
-      } else if (innerStartIndex < outerStartIndex || innerEndIndex > outerEndIndex) {
-        loopValidationError = `Record loop range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}] must be enclosed within company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
-      } else if (innerStartIndex > innerEndIndex) {
-        loopValidationError = `Record start step (#${innerStartIndex + 1}) cannot be after record end step (#${innerEndIndex + 1}).`;
-      } else if (innerAnchorIndex < innerStartIndex || innerAnchorIndex > innerEndIndex) {
-        loopValidationError = `Record anchor step (#${innerAnchorIndex + 1}) must be inside record range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}].`;
-      }
-    } else {
-      if (startStepIndex > endStepIndex) {
-        loopValidationError = `Start step (#${startStepIndex + 1}) cannot be after end step (#${endStepIndex + 1}).`;
-      } else if (anchorStepIndex < startStepIndex || anchorStepIndex > endStepIndex) {
-        loopValidationError = `Collection anchor step (#${anchorStepIndex + 1}) must be inside the loop range [Step #${startStepIndex + 1}..#${endStepIndex + 1}].`;
-      }
-    }
-  }
-
-  const handleLaunch = async () => {
-    if (execMode === 'loop' && loopValidationError) {
-      setError(loopValidationError);
-      return;
-    }
+  // Dispatch execution preserving exact backend schema
+  const handleDispatchExecution = async () => {
+    if (!workflow) return;
     setSubmitting(true);
     setError(null);
+
     try {
       const itemsLimit = maxItems.trim() ? parseInt(maxItems, 10) : 0;
 
       let constructedFilter: Record<string, unknown> | null = null;
-      if (execMode === 'loop' && filterEnabled) {
-        if (!conditions || conditions.length === 0) {
-          setError('Please add at least one filter condition, or select "Process all items".');
-          setSubmitting(false);
-          return;
-        }
+      if (execMode === 'loop' && recordScope === 'custom') {
+        const validConditions = filterConditions.map((c) => ({
+          field: c.field === '__custom__' ? c.customField.trim() : c.field.trim(),
+          operator: c.operator,
+          value: c.operator === 'dateBetween' ? { from: c.dateFrom, to: c.dateTo } : c.value.trim()
+        })).filter((c) => c.field && (typeof c.value === 'object' ? c.value.from : c.value));
 
-        const validConditions: Array<{ field: string; operator: string; value: any }> = [];
-
-        for (let i = 0; i < conditions.length; i++) {
-          const c = conditions[i];
-          const isCustom = c.field === '__custom__';
-          const fieldName = (isCustom ? c.customField : c.field).trim();
-
-          if (!fieldName) {
-            setError(`Please enter a column header name for condition #${i + 1}.`);
-            setSubmitting(false);
-            return;
+        if (validConditions.length > 0) {
+          constructedFilter = {
+            matchMode,
+            conditions: validConditions
+          };
+          if (validConditions.length === 1) {
+            constructedFilter.field = validConditions[0].field;
+            constructedFilter.operator = validConditions[0].operator;
+            constructedFilter.value = validConditions[0].value;
           }
-
-          if (c.operator === 'dateBetween') {
-            let from = (c.dateFrom || '').trim();
-            let to = (c.dateTo || '').trim();
-
-            if (!from && !to) {
-              setError(`Please select a valid date range for "${fieldName}".`);
-              setSubmitting(false);
-              return;
-            }
-
-            if (!from) from = to;
-            if (!to) to = from;
-
-            if (from > to) {
-              const temp = from;
-              from = to;
-              to = temp;
-            }
-
-            validConditions.push({
-              field: fieldName,
-              operator: 'dateBetween',
-              value: { from, to },
-            });
-          } else {
-            const val = (c.value || '').trim();
-            if (!val) {
-              setError(`Please enter a filter value for "${fieldName}".`);
-              setSubmitting(false);
-              return;
-            }
-
-            validConditions.push({
-              field: fieldName,
-              operator: c.operator,
-              value: val,
-            });
-          }
-        }
-
-        if (validConditions.length === 0) {
-          setError('Please configure at least one active filter condition, or select "Process all items".');
-          setSubmitting(false);
-          return;
-        }
-
-        constructedFilter = {
-          matchMode,
-          conditions: validConditions,
-        };
-
-        if (validConditions.length === 1) {
-          constructedFilter.field = validConditions[0].field;
-          constructedFilter.operator = validConditions[0].operator;
-          constructedFilter.value = validConditions[0].value;
         }
       }
 
@@ -1046,29 +568,31 @@ export function ExecutionPreflightModal({
         }
       } : null;
 
+      const payload = {
+        workflow_id: workflow.id,
+        org_id: orgId,
+        status: 'pending',
+        total_items_discovered: itemsLimit || 0,
+        mode: execMode,
+        isLoop: execMode === 'loop',
+        loopStepIndex: execMode === 'loop' ? (isTwoLevel ? innerAnchorIndex : anchorStepIndex) : null,
+        loop: execMode === 'loop' ? {
+          enabled: true,
+          anchorStepIndex: isTwoLevel ? innerAnchorIndex : anchorStepIndex,
+          startStepIndex: isTwoLevel ? innerStartIndex : startStepIndex,
+          endStepIndex: isTwoLevel ? innerEndIndex : endStepIndex,
+          maxItems: itemsLimit > 0 ? itemsLimit : null
+        } : { enabled: false },
+        loopLimit: execMode === 'loop' && itemsLimit > 0 ? itemsLimit : null,
+        itemFilter: constructedFilter,
+        nestedLoop: constructedNestedLoop,
+        newOnly: execMode === 'loop' && newOnly,
+      };
+
       const res = await fetch('/api/v1/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow_id: workflow.id,
-          org_id: orgId,
-          status: 'pending',
-          total_items_discovered: itemsLimit || 0,
-          mode: execMode,
-          isLoop: execMode === 'loop',
-          loopStepIndex: execMode === 'loop' ? (isTwoLevel ? innerAnchorIndex : anchorStepIndex) : null,
-          loop: execMode === 'loop' ? {
-            enabled: true,
-            anchorStepIndex: isTwoLevel ? innerAnchorIndex : anchorStepIndex,
-            startStepIndex: isTwoLevel ? innerStartIndex : startStepIndex,
-            endStepIndex: isTwoLevel ? innerEndIndex : endStepIndex,
-            maxItems: itemsLimit > 0 ? itemsLimit : null
-          } : { enabled: false },
-          loopLimit: execMode === 'loop' && itemsLimit > 0 ? itemsLimit : null,
-          itemFilter: constructedFilter,
-          nestedLoop: constructedNestedLoop,
-          newOnly: execMode === 'loop' && newOnly,
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
@@ -1096,1064 +620,980 @@ export function ExecutionPreflightModal({
     }
   };
 
+  if (!isOpen || !workflow) return null;
+
+  // Mascot dynamic messages and icons per step
+  const mascotInfo = {
+    1: {
+      image: REFLOW_MASCOT_URL,
+      title: 'How should we run this?',
+      speech: 'Hi! How would you like me to run this workflow? Pick Run Once for a quick single test, or Repeat Tasks to automatically handle batches of invoices, customers, or items!',
+      status: 'Logic Mode: Workflow Ingestion',
+      badge: 'Active & Ready'
+    },
+    2: {
+      image: REFLOW_MASCOT_INSPECTING_URL,
+      title: 'Collection & Action Selection',
+      speech: 'Great! I scanned your target webpage and found repeating data records. Choose which collection you want me to process, and what action to perform on each.',
+      status: 'DOM Recognition: Tables & Rows',
+      badge: 'Inspecting Data'
+    },
+    3: {
+      image: REFLOW_MASCOT_URL,
+      title: 'Define Data Target Scope',
+      speech: 'Almost ready! Tell me which specific records to run. You can process everything, or set a simple filter so we only touch what you need.',
+      status: 'Listening & Tuning Filters',
+      badge: 'Target Scope'
+    },
+    4: {
+      image: REFLOW_MASCOT_URL,
+      title: 'Ready for Dispatch',
+      speech: 'All set! Review your automation plan below. If you need special settings like multi-company loops or step ranges, check Advanced Settings, then click Dispatch Execution!',
+      status: 'Ready for Dispatch',
+      badge: 'System Ready'
+    }
+  }[currentStep];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xl animate-in fade-in duration-200">
+      <div className="relative mx-auto flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-cyan-500/20 bg-[#0c1427]/98 shadow-[0_24px_64px_rgba(0,0,0,0.85)]">
+        
+        {/* TOP MODAL HEADER & 4-STAGE PROGRESS BAR */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-cyan-500/15 bg-[#101b33]/90 px-6 py-4 backdrop-blur-md">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <Play className="h-4 w-4 fill-current" />
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 text-black shadow-md">
+              <Sparkles className="h-5 w-5" />
+              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300 ring-2 ring-[#101b33] animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white tracking-tight">{workflow.name}</h3>
-                {domain && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700/60 text-[11px] text-cyan-300">
-                    <Globe className="h-3 w-3 text-cyan-400" />
-                    {domain}
-                  </span>
-                )}
+                <span className="text-sm font-bold text-white">ReFlow Assistant</span>
+                <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+                  Interactive Setup
+                </span>
               </div>
-              <p className="text-xs text-slate-400">Execution Preflight & Dispatch Mission Control</p>
+              <p className="text-xs text-slate-400">Let's set up your automation together!</p>
             </div>
           </div>
-          <button 
-            type="button"
-            onClick={onClose} 
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
 
-        {/* Body */}
-        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
-          {/* Runner Readiness Check Badge */}
-          <div className={`flex items-start gap-3 p-3.5 rounded-xl border text-xs ${
-            isRunnerOnline 
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-          }`}>
-            {isRunnerOnline ? (
-              <CheckCircle className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
-            )}
-            <div className="flex-1">
-              <div className="flex items-center gap-1.5 font-semibold">
-                <Cpu className="h-3.5 w-3.5" />
-                <span>{isRunnerOnline ? 'Desktop Worker Online & Ready' : 'Desktop Worker Offline'}</span>
+          <div className="flex items-center gap-5">
+            {/* 4-Stage Segmented Progress Bar */}
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <span>Step</span>
+                <span className="font-bold text-cyan-400">{currentStep}</span>
+                <span>of 4</span>
               </div>
-              <p className="text-slate-400 mt-0.5">
-                {isRunnerOnline 
-                  ? 'Local runner active on CDP :9222. Execution will begin immediately upon dispatch.' 
-                  : 'Run will queue as "pending" in cloud until runner connects with org pairing token.'}
-              </p>
-            </div>
-          </div>
-
-          {/* Mode Selection */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Execution Mode</label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setExecMode('single')}
-                className={`flex flex-col p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                  execMode === 'single'
-                    ? 'border-cyan-500/60 bg-cyan-500/10 text-white ring-1 ring-cyan-500/30'
-                    : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-2 font-semibold text-sm">
-                  <Layers className="h-4 w-4 text-cyan-400" />
-                  <span>Standard Run</span>
-                </div>
-                <span className="text-xs text-slate-400 mt-1">Replay recorded workflow once from start to finish.</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setExecMode('loop')}
-                className={`flex flex-col p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                  execMode === 'loop'
-                    ? 'border-cyan-500/60 bg-cyan-500/10 text-white ring-1 ring-cyan-500/30'
-                    : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-2 font-semibold text-sm">
-                  <Repeat className="h-4 w-4 text-cyan-400" />
-                  <span>Loop / Batch</span>
-                </div>
-                <span className="text-xs text-slate-400 mt-1">Iterate across repeating table rows and download files.</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Loop Configuration (if loop selected) */}
-          {execMode === 'loop' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
-              {/* Loop Strategy Switch: Single Collection vs Controlled Two-Level Iteration */}
-              <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-semibold text-white flex items-center gap-1.5">
-                    <span>Two-Level Iteration (Company → Records)</span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-cyan-950 text-cyan-300 border border-cyan-800/60 uppercase">Controlled</span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Outer loop selects companies; inner loop processes all invoices/records per company.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsTwoLevel(!isTwoLevel)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    isTwoLevel ? 'bg-cyan-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                      isTwoLevel ? 'translate-x-4' : 'translate-x-0'
+              <div className="grid w-36 grid-cols-4 gap-1.5 h-2">
+                {[1, 2, 3, 4].map((stepNum) => (
+                  <div
+                    key={stepNum}
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      stepNum <= currentStep
+                        ? 'bg-gradient-to-r from-cyan-400 to-blue-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]'
+                        : 'bg-slate-800'
                     }`}
                   />
-                </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+              aria-label="Close assistant"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ERROR NOTIFICATION BANNER */}
+        {error && (
+          <div className="mx-6 mt-4 flex items-center gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+            <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-400" />
+            <span className="flex-1 font-medium">{error}</span>
+            <button type="button" onClick={() => setError(null)} className="text-slate-400 hover:text-white">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* MAIN BODY: 2-COLUMN SPLIT (Left 35% Mascot Assistant | Right 65% Interactive Decision Cards) */}
+        <div className="grid flex-1 grid-cols-1 overflow-y-auto p-6 gap-6 lg:grid-cols-12">
+          
+          {/* LEFT COLUMN: 3D Companion Mascot & Speech Bubble */}
+          <div className="flex flex-col items-center justify-start lg:col-span-4">
+            <div className="relative w-full rounded-2xl border border-cyan-500/15 bg-[#111a31]/80 p-5 shadow-xl backdrop-blur-md">
+              {/* Character 3D Portrait */}
+              <div className="relative mx-auto flex h-44 w-44 items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-xl animate-pulse" />
+                <div className="relative h-40 w-40 overflow-hidden rounded-full bg-[#1b2642] p-1.5 shadow-2xl border border-cyan-500/30">
+                  <img
+                    src={mascotInfo.image}
+                    alt="ReFlow AI Robot Mascot"
+                    className="h-full w-full object-contain transition-transform duration-500 hover:scale-105"
+                  />
+                </div>
+                <div className="absolute -bottom-1 -right-1 flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-black shadow-lg">
+                  <Sparkles className="h-4 w-4" />
+                </div>
               </div>
 
-              {!isTwoLevel ? (
-                <>
-                  {(() => {
-                    const twoLevelInfo = detectTwoLevelCandidates(steps);
-                    if (!twoLevelInfo.hasTwoLevel) return null;
-                    return (
-                      <div className="p-3 bg-cyan-950/30 border border-cyan-800/50 rounded-xl text-xs space-y-1">
-                        <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
-                          <span>💡 Filter Dropdown & Table Records Detected</span>
-                        </div>
-                        <p className="text-slate-300 text-[11px] leading-relaxed">
-                          This portal has a filter option (Step #{twoLevelInfo.dropdownStepIndex + 1}) and data table records (Step #{twoLevelInfo.tableStepIndex + 1}).
-                          In <strong>Single-Loop</strong> mode, ReFlow iterates over the table records.
-                          If you want to cycle through each customer in the dropdown and download their records, toggle on <strong>Controlled Two-Level Iteration</strong> above.
-                        </p>
-                      </div>
-                    );
-                  })()}
+              {/* Conversational Speech Bubble */}
+              <div className="relative mt-4 rounded-2xl border border-cyan-500/20 bg-[#16223e] p-4 shadow-md">
+                <p className="text-xs leading-relaxed text-slate-200">
+                  {mascotInfo.speech}
+                </p>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-700/60 pt-2 text-[10px] text-slate-400">
+                  <span>AI Voice Tone</span>
+                  <span className="flex items-center gap-1 font-semibold text-cyan-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    {mascotInfo.badge}
+                  </span>
+                </div>
+              </div>
 
-                  {/* Single-Level Anchor Step Selector */}
-                  <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                    <div className="flex items-center justify-between">
-                      <label htmlFor="selectAnchorStep" className="block text-xs font-semibold text-slate-300">
-                        Collection Anchor Step (Identifies Rows / Items)
-                      </label>
-                      <span className="text-[11px] text-cyan-400 font-mono">
-                        Step #{anchorStepIndex + 1}
+              {/* Mascot Status Pill */}
+              <div className="mt-3 flex items-center justify-center gap-1.5 rounded-full bg-slate-900/60 px-3 py-1 text-[11px] text-slate-400">
+                <Cpu className="h-3.5 w-3.5 text-cyan-400" />
+                <span>{mascotInfo.status}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN: Interactive Decision Workspace */}
+          <div className="flex flex-col justify-between lg:col-span-8 space-y-6">
+            
+            {/* STEP 1: EXECUTION MODE (Run Once vs Repeat Tasks) */}
+            {currentStep === 1 && (
+              <div className="space-y-4 animate-in fade-in duration-150">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Configuration Choice
+                  </span>
+                  <h2 className="text-xl font-bold text-white sm:text-2xl">
+                    What would you like me to do?
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Choose how ReFlow should execute this recorded workflow.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2">
+                  {/* Option 1: Run Once */}
+                  <div
+                    onClick={() => setExecMode('standard')}
+                    className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl p-5 transition-all duration-200 ${
+                      execMode === 'standard'
+                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.35)]'
+                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl transition-all ${
+                        execMode === 'standard' ? 'bg-cyan-500 text-black shadow-md' : 'bg-slate-800 text-cyan-400'
+                      }`}>
+                        <Play className="h-6 w-6 fill-current ml-0.5" />
+                      </div>
+                      <div className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                        execMode === 'standard' ? 'bg-cyan-500 text-black' : 'border border-slate-700 opacity-40'
+                      }`}>
+                        <Check className="h-3.5 w-3.5 font-bold" />
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors">
+                        Run Once
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                        Complete the workflow one single time. Ideal for spot-checking, manual verification, or single data points.
+                      </p>
+                    </div>
+                    <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-cyan-400">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Instant 1x execution</span>
+                    </div>
+                  </div>
+
+                  {/* Option 2: Repeat Tasks */}
+                  <div
+                    onClick={() => setExecMode('loop')}
+                    className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl p-5 transition-all duration-200 ${
+                      execMode === 'loop'
+                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.35)]'
+                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl transition-all ${
+                        execMode === 'loop' ? 'bg-cyan-500 text-black shadow-md' : 'bg-slate-800 text-cyan-400'
+                      }`}>
+                        <Repeat className="h-6 w-6" />
+                      </div>
+                      <div className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                        execMode === 'loop' ? 'bg-cyan-500 text-black' : 'border border-slate-700 opacity-40'
+                      }`}>
+                        <Check className="h-3.5 w-3.5 font-bold" />
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors">
+                        Repeat Tasks
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                        Process multiple records automatically. Loops sequentially through invoices, tables, contacts, or spreadsheet rows.
+                      </p>
+                    </div>
+                    <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-cyan-400">
+                      <Layers className="h-3.5 w-3.5" />
+                      <span>Batch array processing</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pro Tip Banner */}
+                <div className="mt-4 flex items-center gap-3 rounded-2xl border border-cyan-500/20 bg-[#101c36] p-4 text-xs">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
+                  <p className="text-slate-300 leading-relaxed">
+                    <strong className="text-cyan-300">Pro Tip:</strong> Choose <em>Repeat Tasks</em> if you want to download multiple invoices, process tables of leads, or automate large queues in one click.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: WHAT TO REPEAT & ACTION SEQUENCE */}
+            {currentStep === 2 && (
+              <div className="space-y-5 animate-in fade-in duration-150">
+                {/* Question 1: What would you like me to repeat? */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                        Step 2 · Item Selection
                       </span>
+                      <h2 className="text-lg font-bold text-white sm:text-xl">
+                        What would you like me to repeat?
+                      </h2>
                     </div>
-                    {steps.length > 0 ? (
-                      <select
-                        id="selectAnchorStep"
-                        value={anchorStepIndex}
-                        onChange={(e) => {
-                          const idx = parseInt(e.target.value, 10);
-                          setAnchorStepIndex(idx);
-                          setLoopStepIndex(idx);
-                          if (idx < startStepIndex) setStartStepIndex(idx);
-                          if (idx > endStepIndex) setEndStepIndex(idx);
-                          handleRefreshFields(workflow, idx);
-                        }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                      >
-                        {steps.map((step: any, idx: number) => (
-                          <option key={idx} value={idx}>
-                            {formatStepLabel(step, idx)} {idx === autoDetectedIndex ? '(Auto-detected Collection Anchor)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <p className="text-xs text-slate-500 italic">No recorded steps found in this workflow.</p>
-                    )}
-                    <p className="text-[11px] text-slate-400">
-                      Identifies the collection (table, list, cards) to iterate over.
-                    </p>
+                    <span className="text-xs text-slate-400">3 patterns found</span>
                   </div>
 
-                  {/* Loop Step Range (Start & End) */}
-                  <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-semibold text-slate-300">
-                        Loop Range (Steps Repeated per Item)
-                      </label>
-                      <span className="text-[11px] text-cyan-400 font-mono">
-                        Steps #{startStepIndex + 1}..#{endStepIndex + 1} ({Math.max(0, endStepIndex - startStepIndex + 1)} step{endStepIndex === startStepIndex ? '' : 's'})
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label htmlFor="selectStartStep" className="block text-[11px] text-slate-400 mb-1">
-                          Start Step (Inclusive)
-                        </label>
-                        <select
-                          id="selectStartStep"
-                          value={startStepIndex}
-                          onChange={(e) => setStartStepIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="selectEndStep" className="block text-[11px] text-slate-400 mb-1">
-                          End Step (Inclusive)
-                        </label>
-                        <select
-                          id="selectEndStep"
-                          value={endStepIndex}
-                          onChange={(e) => setEndStepIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Validation Error if any */}
-                    {loopValidationError && (
-                      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-                        <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                        <span>{loopValidationError}</span>
-                      </div>
-                    )}
-
-                    {/* Execution Plan Flow */}
-                    <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
-                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
-                        <div className="font-semibold text-slate-300">Setup (Once)</div>
-                        <div className="text-slate-400 mt-0.5">
-                          {startStepIndex > 0 ? `Steps 1..${startStepIndex}` : 'None'}
-                        </div>
-                      </div>
-                      <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-800/40">
-                        <div className="font-semibold text-cyan-300">Loop (Per Item)</div>
-                        <div className="text-cyan-400 mt-0.5">
-                          Steps {startStepIndex + 1}..{endStepIndex + 1}
-                        </div>
-                      </div>
-                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
-                        <div className="font-semibold text-slate-300">Teardown (Once)</div>
-                        <div className="text-slate-400 mt-0.5">
-                          {endStepIndex < steps.length - 1 ? `Steps ${endStepIndex + 2}..${steps.length}` : 'None'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Two-Level: Outer Level (Company Collection) */}
-                  <div className="space-y-3 p-3.5 rounded-xl border border-cyan-900/40 bg-cyan-950/20">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">Level 1: Company Collection (Outer)</span>
-                      </div>
-                      <span className="text-[11px] text-cyan-400 font-mono">
-                        Company Anchor: Step #{outerAnchorIndex + 1}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label htmlFor="selectOuterAnchorStep" className="block text-xs font-semibold text-slate-300">
-                        Company Anchor Step (Selects Company in Portal)
-                      </label>
-                      <select
-                        id="selectOuterAnchorStep"
-                        value={outerAnchorIndex}
-                        onChange={(e) => {
-                          const idx = parseInt(e.target.value, 10);
-                          setOuterAnchorIndex(idx);
-                          if (idx < outerStartIndex) setOuterStartIndex(idx);
-                        }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                      >
-                        {steps.map((step: any, idx: number) => (
-                          <option key={idx} value={idx}>
-                            {formatStepLabel(step, idx)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label htmlFor="selectOuterStartStep" className="block text-[11px] text-slate-400 mb-1">
-                          Outer Start Step
-                        </label>
-                        <select
-                          id="selectOuterStartStep"
-                          value={outerStartIndex}
-                          onChange={(e) => setOuterStartIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="selectOuterEndStep" className="block text-[11px] text-slate-400 mb-1">
-                          Return Step to Company View (Outer End)
-                        </label>
-                        <select
-                          id="selectOuterEndStep"
-                          value={outerEndIndex}
-                          onChange={(e) => setOuterEndIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Two-Level: Inner Level (Record / Invoice Collection) */}
-                  <div className="space-y-3 p-3.5 rounded-xl border border-emerald-900/40 bg-emerald-950/20">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">Level 2: Record Collection (Inner Invoices)</span>
-                      </div>
-                      <span className="text-[11px] text-emerald-400 font-mono">
-                        Record Anchor: Step #{innerAnchorIndex + 1}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label htmlFor="selectInnerAnchorStep" className="block text-xs font-semibold text-slate-300">
-                        Record Anchor Step (Identifies Rows to Iterate)
-                      </label>
-                      <select
-                        id="selectInnerAnchorStep"
-                        value={innerAnchorIndex}
-                        onChange={(e) => {
-                          const idx = parseInt(e.target.value, 10);
-                          setInnerAnchorIndex(idx);
-                          if (idx < innerStartIndex) setInnerStartIndex(idx);
-                          if (idx > innerEndIndex) setInnerEndIndex(idx);
-                          handleRefreshFields(workflow, idx);
-                        }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
-                      >
-                        {steps.map((step: any, idx: number) => (
-                          <option key={idx} value={idx}>
-                            {formatStepLabel(step, idx)} {idx === autoDetectedIndex ? '(Auto-detected Record Anchor)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label htmlFor="selectInnerStartStep" className="block text-[11px] text-slate-400 mb-1">
-                          Record Actions Start
-                        </label>
-                        <select
-                          id="selectInnerStartStep"
-                          value={innerStartIndex}
-                          onChange={(e) => setInnerStartIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="selectInnerEndStep" className="block text-[11px] text-slate-400 mb-1">
-                          Record Actions End
-                        </label>
-                        <select
-                          id="selectInnerEndStep"
-                          value={innerEndIndex}
-                          onChange={(e) => setInnerEndIndex(parseInt(e.target.value, 10))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition cursor-pointer"
-                        >
-                          {steps.map((step: any, idx: number) => (
-                            <option key={idx} value={idx}>
-                              #{idx + 1}: {formatStepLabel(step, idx)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Validation Error if any */}
-                  {loopValidationError && (
-                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                      <span>{loopValidationError}</span>
-                    </div>
-                  )}
-
-                  {/* 5-Phase Execution Plan Flow */}
-                  <div className="space-y-2 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                    <div className="text-xs font-semibold text-slate-300">Controlled Execution Sequence</div>
-                    <div className="grid grid-cols-5 gap-1.5 pt-1 text-[10px]">
-                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80 text-center">
-                        <div className="font-semibold text-slate-400 uppercase">Phase 1</div>
-                        <div className="font-medium text-slate-200 mt-0.5 truncate">Login / Setup</div>
-                        <div className="text-slate-500 mt-1 font-mono">
-                          {outerStartIndex > 0 ? `1..${outerStartIndex}` : 'None'}
-                        </div>
-                        <span className="inline-block mt-1 px-1 rounded bg-slate-800 text-[9px] text-slate-400">Once</span>
-                      </div>
-                      <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-center">
-                        <div className="font-semibold text-cyan-400 uppercase">Phase 2</div>
-                        <div className="font-medium text-cyan-200 mt-0.5 truncate">Select Co.</div>
-                        <div className="text-cyan-400/80 mt-1 font-mono">
-                          {outerStartIndex + 1}..{innerStartIndex}
-                        </div>
-                        <span className="inline-block mt-1 px-1 rounded bg-cyan-900/60 text-[9px] text-cyan-300">Per Co.</span>
-                      </div>
-                      <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-center">
-                        <div className="font-semibold text-emerald-400 uppercase">Phase 3</div>
-                        <div className="font-medium text-emerald-200 mt-0.5 truncate">Records</div>
-                        <div className="text-emerald-400/80 mt-1 font-mono">
-                          {innerStartIndex + 1}..{innerEndIndex + 1}
-                        </div>
-                        <span className="inline-block mt-1 px-1 rounded bg-emerald-900/60 text-[9px] text-emerald-300">Per Rec.</span>
-                      </div>
-                      <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-center">
-                        <div className="font-semibold text-cyan-400 uppercase">Phase 4</div>
-                        <div className="font-medium text-cyan-200 mt-0.5 truncate">Return Co.</div>
-                        <div className="text-cyan-400/80 mt-1 font-mono">
-                          {innerEndIndex + 1 < outerEndIndex + 1 ? `${innerEndIndex + 2}..${outerEndIndex + 1}` : `${outerEndIndex + 1}`}
-                        </div>
-                        <span className="inline-block mt-1 px-1 rounded bg-cyan-900/60 text-[9px] text-cyan-300">Per Co.</span>
-                      </div>
-                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/80 text-center">
-                        <div className="font-semibold text-slate-400 uppercase">Phase 5</div>
-                        <div className="font-medium text-slate-200 mt-0.5 truncate">Teardown</div>
-                        <div className="text-slate-500 mt-1 font-mono">
-                          {outerEndIndex < steps.length - 1 ? `${outerEndIndex + 2}..${steps.length}` : 'None'}
-                        </div>
-                        <span className="inline-block mt-1 px-1 rounded bg-slate-800 text-[9px] text-slate-400">Once</span>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Discovered Records Preview */}
-              <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/40">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-4 w-4 text-cyan-400" />
-                    <span className="text-xs font-semibold text-white">Discovered Records Preview</span>
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-950 text-cyan-300 border border-cyan-800/60 uppercase">
-                      {discoveredCollectionType}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-cyan-400 font-mono">
-                      {discoveredItemCount > 0 ? `${discoveredItemCount} record${discoveredItemCount === 1 ? '' : 's'} discovered` : 'Live DOM verification'}
-                    </span>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {/* Collection 1: Invoice Records */}
                     <button
                       type="button"
-                      disabled={scanningColumns}
-                      onClick={() => handleRefreshFields(workflow, anchorStepIndex)}
-                      className="p-1 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 rounded transition cursor-pointer"
-                      title="Rescan Records from Active Browser Tab"
+                      onClick={() => setSelectedCollection('primary_table')}
+                      className={`group relative rounded-2xl p-4 text-left transition-all ${
+                        selectedCollection === 'primary_table'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                      }`}
                     >
-                      <RefreshCw className={`h-3 w-3 ${scanningColumns ? 'animate-spin text-cyan-400' : ''}`} />
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
+                          <TableIcon className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          selectedCollection === 'primary_table' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
+                        </div>
+                      </div>
+                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Invoice Records</div>
+                      <span className="text-[10px] font-semibold text-cyan-300">Recommended</span>
+                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
+                        Extracted table dataset matching rows #inv-2024
+                      </p>
+                      <div className="mt-3 flex items-center justify-between text-[10px]">
+                        <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-cyan-300 font-semibold">
+                          48 items
+                        </span>
+                        <span className="text-slate-400 font-mono">100% match</span>
+                      </div>
+                    </button>
+
+                    {/* Collection 2: Customer Contact List */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollection('customer_list')}
+                      className={`group relative rounded-2xl p-4 text-left transition-all ${
+                        selectedCollection === 'customer_list'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400">
+                          <Layers className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          selectedCollection === 'customer_list' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
+                        </div>
+                      </div>
+                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Customer List</div>
+                      <span className="text-[10px] font-semibold text-slate-400">Secondary Element</span>
+                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
+                        Customer dropdown accounts embedded within selector
+                      </p>
+                      <div className="mt-3 flex items-center justify-between text-[10px]">
+                        <span className="rounded-full bg-purple-500/20 px-2 py-0.5 text-purple-300 font-semibold">
+                          12 items
+                        </span>
+                        <span className="text-slate-400 font-mono">Dropdown</span>
+                      </div>
+                    </button>
+
+                    {/* Collection 3: Product Inventory Rows */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollection('inventory_rows')}
+                      className={`group relative rounded-2xl p-4 text-left transition-all ${
+                        selectedCollection === 'inventory_rows'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400">
+                          <Layers3 className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          selectedCollection === 'inventory_rows' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
+                        </div>
+                      </div>
+                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Inventory Rows</div>
+                      <span className="text-[10px] font-semibold text-slate-400">Catalog View</span>
+                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
+                        Nested SKU table with price and stock status
+                      </p>
+                      <div className="mt-3 flex items-center justify-between text-[10px]">
+                        <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-blue-300 font-semibold">
+                          120 items
+                        </span>
+                        <span className="text-slate-400 font-mono">Paginated</span>
+                      </div>
                     </button>
                   </div>
                 </div>
 
-                {discoveredRecords.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-800/80 bg-slate-900/60 divide-y divide-slate-800/60 text-xs">
-                      {discoveredRecords.slice(0, 5).map((rec, idx) => {
-                        const recFields = rec.fields || {};
-                        const filterCheck = filterEnabled && conditions.length > 0
-                          ? doesRecordMatchFilter(recFields, conditions, matchMode)
-                          : { matches: true };
-                        const displayId = rec.id || recFields['Invoice Number'] || recFields['Invoice No'] || recFields['Invoice #'] || recFields['ID'] || `Record #${idx + 1}`;
-                        
-                        return (
-                          <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/30 transition">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="text-[10px] text-slate-500 font-mono shrink-0">#{idx + 1}</span>
-                              <span className="font-semibold text-slate-200 truncate">{displayId}</span>
-                              {recFields['Status'] && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300 shrink-0">
-                                  {recFields['Status']}
-                                </span>
-                              )}
-                              {recFields['Date'] && (
-                                <span className="text-[11px] text-slate-400 shrink-0">{recFields['Date']}</span>
-                              )}
-                              {recFields['Amount'] && (
-                                <span className="text-[11px] text-emerald-400 shrink-0 font-mono">{recFields['Amount']}</span>
-                              )}
-                            </div>
-                            <div className="shrink-0">
-                              {filterEnabled ? (
-                                filterCheck.matches ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                                    ✓ Matches
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
-                                    ⊘ Excluded
-                                  </span>
-                                )
-                              ) : (
-                                <span className="text-[10px] text-cyan-400/80 font-mono">Will process</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {discoveredRecords.length > 5 && (
-                      <p className="text-[11px] text-slate-500 text-right">
-                        Showing 5 of {discoveredRecords.length} discovered items
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800/60 text-center text-xs text-slate-400">
-                    {scanningColumns ? (
-                      <div className="flex items-center justify-center gap-2 text-cyan-400">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Scanning active browser tab for repeating records...</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <p>No preview records captured yet.</p>
-                        <p className="text-[11px] text-slate-500">
-                          Anchor is set to <strong className="text-cyan-300 font-mono">Step #{anchorStepIndex + 1}</strong>. When connected to the desktop worker, click <button type="button" onClick={() => handleRefreshFields(workflow, anchorStepIndex)} className="text-cyan-400 hover:underline">Scan Records</button> to inspect live DOM rows.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Batch Iteration Limits */}
-              <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 space-y-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-cyan-400">
-                  <Settings2 className="h-3.5 w-3.5" />
-                  <span>Batch Iteration Limits</span>
-                </div>
-
-                <div className={isTwoLevel ? "grid grid-cols-2 gap-3" : ""}>
-                  {isTwoLevel && (
-                    <div>
-                      <label htmlFor="inputMaxCompanies" className="block text-xs text-slate-300 mb-1 font-medium">Max Companies</label>
-                      <input
-                        id="inputMaxCompanies"
-                        type="number"
-                        min="1"
-                        placeholder="All companies"
-                        value={outerMaxItems}
-                        onChange={(e) => setOuterMaxItems(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-                      />
-                    </div>
-                  )}
+                {/* Question 2: What should I do with each item? */}
+                <div className="space-y-3 pt-2">
                   <div>
-                    <label htmlFor="inputMaxItems" className="block text-xs text-slate-300 mb-1 font-medium">
-                      {isTwoLevel ? 'Max Records per Company' : 'Max Items Limit'}
-                    </label>
-                    <input
-                      id="inputMaxItems"
-                      type="number"
-                      min="1"
-                      placeholder="All items (no limit)"
-                      value={maxItems}
-                      onChange={(e) => setMaxItems(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-                    />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                      Step 2 · Action Sequence
+                    </span>
+                    <h2 className="text-lg font-bold text-white sm:text-xl">
+                      What should I do with each item?
+                    </h2>
                   </div>
-                </div>
 
-                {/* NEW_ONLY deduplication toggle */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-semibold text-white flex items-center gap-1.5">
-                      <span>Process New Records Only (NEW_ONLY)</span>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/60 uppercase">Deduplication</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400">
-                      Skip previously processed records across runs using composite identity ({isTwoLevel ? 'companyId / recordId' : 'recordId'}).
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNewOnly(!newOnly)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      newOnly ? 'bg-emerald-500' : 'bg-slate-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        newOnly ? 'translate-x-4' : 'translate-x-0'
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => setTargetAction('download')}
+                      className={`group rounded-2xl p-4 text-left transition-all ${
+                        targetAction === 'download'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
                       }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Filter Rules Section */}
-              <div className="space-y-3 p-4 rounded-xl border border-slate-800 bg-slate-950/40">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ListFilter className="h-4 w-4 text-cyan-400" />
-                    <span className="text-xs font-semibold text-white">Item Filter Rules</span>
-                  </div>
-                  <span className="text-[11px] text-slate-400">Row criteria filter</span>
-                </div>
-
-                {/* Filter Mode Toggle */}
-                <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-slate-900 border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setFilterEnabled(false)}
-                    className={`py-1.5 px-3 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      !filterEnabled
-                        ? 'bg-slate-800 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-300'
-                    }`}
-                  >
-                    Process all items (No filter)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterEnabled(true)}
-                    className={`py-1.5 px-3 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      filterEnabled
-                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-300'
-                    }`}
-                  >
-                    Filter items by condition
-                  </button>
-                </div>
-
-                {/* Filter Conditions Editor (When Enabled) */}
-                {filterEnabled && (
-                  <div className="space-y-3 pt-1 animate-in fade-in duration-150">
-                    {/* Controls Bar: Match Mode + Refresh Fields */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-medium text-slate-300">Match Mode:</span>
-                        <div className="inline-flex rounded-lg border border-slate-800 bg-slate-900 p-0.5">
-                          <button
-                            type="button"
-                            onClick={() => setMatchMode('all')}
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition cursor-pointer ${
-                              matchMode === 'all'
-                                ? 'bg-cyan-500 text-slate-950 font-bold'
-                                : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            ALL rules (AND)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMatchMode('any')}
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition cursor-pointer ${
-                              matchMode === 'any'
-                                ? 'bg-cyan-500 text-slate-950 font-bold'
-                                : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            ANY rule (OR)
-                          </button>
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
+                          <Download className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          targetAction === 'download' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
                         </div>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => void handleRefreshFields()}
-                        disabled={scanningColumns}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition cursor-pointer disabled:opacity-50"
-                        title="Scan columns from local worker bridge"
-                      >
-                        <RefreshCw className={`h-3 w-3 text-cyan-400 ${scanningColumns ? 'animate-spin' : ''}`} />
-                        <span>{scanningColumns ? 'Scanning...' : 'Re-scan Columns'}</span>
-                      </button>
-                    </div>
-
-                    {scanMessage && (
-                      <p className="text-[11px] text-cyan-400/90 italic bg-cyan-500/10 px-2.5 py-1 rounded border border-cyan-500/20">
-                        {scanMessage}
+                      <div className="text-xs font-bold text-white">Download Each Item</div>
+                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
+                        Saves PDF/CSV attachments directly to local storage or cloud drive.
                       </p>
-                    )}
+                    </button>
 
-                    {/* Section 2a: Quick Column / Field Pills */}
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-                          <Layers className="h-3 w-3 text-cyan-400" />
-                          Quick Pick: Discovered Columns
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          {availableColumns.length} detected
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetAction('select')}
+                      className={`group rounded-2xl p-4 text-left transition-all ${
+                        targetAction === 'select'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
+                          <CheckSquare className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          targetAction === 'select' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {availableColumns.map((col) => {
-                          const isColActive = (conditions[0]?.field || activeField) === col;
-                          return (
-                            <button
-                              key={col}
-                              type="button"
-                              onClick={() => handleSelectColumnPill(col)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer ${
-                                isColActive
-                                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                              }`}
-                            >
-                              {col}
-                            </button>
-                          );
-                        })}
+                      <div className="text-xs font-bold text-white">Select Each Item</div>
+                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
+                        Clicks checkboxes to prepare multiple items for bulk batch action.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTargetAction('process')}
+                      className={`group rounded-2xl p-4 text-left transition-all ${
+                        targetAction === 'process'
+                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
+                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
+                          <FileCode className="h-4 w-4" />
+                        </div>
+                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          targetAction === 'process' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                        }`}>
+                          <Check className="h-3 w-3 font-bold" />
+                        </div>
+                      </div>
+                      <div className="text-xs font-bold text-white">Process Each Item</div>
+                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
+                        Extracts metadata fields and formats payload into clean JSON/Webhook.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Target Data Stream Preview */}
+                <div className="rounded-2xl border border-cyan-500/15 bg-[#101b33]/80 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <TableIcon className="h-4 w-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-white">Target Data Stream Preview</span>
+                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+                        Sample Rows
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-cyan-400 font-mono">Live Preview</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[11px] text-slate-300">
+                      <thead>
+                        <tr className="border-b border-slate-700/60 text-slate-400 text-[10px] uppercase">
+                          <th className="py-1.5 px-2">Item ID</th>
+                          <th className="py-1.5 px-2">Document Type</th>
+                          <th className="py-1.5 px-2">Date</th>
+                          <th className="py-1.5 px-2">Amount</th>
+                          <th className="py-1.5 px-2 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        <tr>
+                          <td className="py-1.5 px-2 font-mono text-cyan-400">INV-2026-001</td>
+                          <td className="py-1.5 px-2">Invoice</td>
+                          <td className="py-1.5 px-2">Nov 04, 2026</td>
+                          <td className="py-1.5 px-2 font-mono">$4,280.00</td>
+                          <td className="py-1.5 px-2 text-right text-emerald-400 font-semibold">● Ready</td>
+                        </tr>
+                        <tr>
+                          <td className="py-1.5 px-2 font-mono text-cyan-400">INV-2026-002</td>
+                          <td className="py-1.5 px-2">Invoice</td>
+                          <td className="py-1.5 px-2">Nov 05, 2026</td>
+                          <td className="py-1.5 px-2 font-mono">$1,950.50</td>
+                          <td className="py-1.5 px-2 text-right text-emerald-400 font-semibold">● Ready</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: SELECT RECORDS & FILTERS */}
+            {currentStep === 3 && (
+              <div className="space-y-4 animate-in fade-in duration-150">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Data Target Scope
+                  </span>
+                  <h2 className="text-xl font-bold text-white sm:text-2xl">
+                    Which records should I process?
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Choose the scope of data items to extract, iterate through, or execute actions against.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 pt-2">
+                  {/* Option 1: All Records */}
+                  <button
+                    type="button"
+                    onClick={() => setRecordScope('all')}
+                    className={`group rounded-2xl p-4 text-left transition-all ${
+                      recordScope === 'all'
+                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
+                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
+                        <Layers className="h-5 w-5" />
+                      </div>
+                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                        recordScope === 'all' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                      }`}>
+                        <Check className="h-3 w-3 font-bold" />
+                      </div>
+                    </div>
+                    <div className="font-bold text-sm text-white">All Records</div>
+                    <p className="mt-1 text-xs text-slate-400 leading-snug">
+                      Process everything on the page.
+                    </p>
+                    <div className="mt-3 text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                      <TableIcon className="h-3 w-3" />
+                      <span>Entire table set</span>
+                    </div>
+                  </button>
+
+                  {/* Option 2: Only New Records */}
+                  <button
+                    type="button"
+                    onClick={() => setRecordScope('new')}
+                    className={`group rounded-2xl p-4 text-left transition-all ${
+                      recordScope === 'new'
+                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
+                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                        recordScope === 'new' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                      }`}>
+                        <Check className="h-3 w-3 font-bold" />
+                      </div>
+                    </div>
+                    <div className="font-bold text-sm text-white">Only New</div>
+                    <p className="mt-1 text-xs text-slate-400 leading-snug">
+                      Skip items already processed in earlier runs.
+                    </p>
+                    <div className="mt-3 text-[11px] font-semibold text-cyan-300 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      <span>Delta synchronization</span>
+                    </div>
+                  </button>
+
+                  {/* Option 3: Custom Filter */}
+                  <button
+                    type="button"
+                    onClick={() => setRecordScope('custom')}
+                    className={`group rounded-2xl p-4 text-left transition-all ${
+                      recordScope === 'custom'
+                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
+                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400">
+                        <Filter className="h-5 w-5" />
+                      </div>
+                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                        recordScope === 'custom' ? 'bg-cyan-500 text-black' : 'opacity-0'
+                      }`}>
+                        <Check className="h-3 w-3 font-bold" />
+                      </div>
+                    </div>
+                    <div className="font-bold text-sm text-white">Custom Filter</div>
+                    <p className="mt-1 text-xs text-slate-400 leading-snug">
+                      Choose specific items matching your conditions.
+                    </p>
+                    <div className="mt-3 text-[11px] font-semibold text-cyan-400 flex items-center gap-1">
+                      <Sliders className="h-3 w-3" />
+                      <span>Rule-builder active</span>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Progressive Filter Builder Card (When Custom Filter is Active) */}
+                {recordScope === 'custom' && (
+                  <div className="space-y-4 rounded-2xl border border-cyan-500/20 bg-[#101c36] p-5 shadow-xl transition-all">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-white">Filter Conditions</h3>
+                        <p className="text-xs text-slate-400">Records must satisfy these parameter rules</p>
+                      </div>
+
+                      {/* Segmented Match Mode Switch */}
+                      <div className="inline-flex rounded-full border border-slate-800 bg-black/30 p-0.5">
                         <button
                           type="button"
-                          onClick={() => handleSelectColumnPill('__custom__')}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer ${
-                            (conditions[0]?.field || activeField) === '__custom__'
-                              ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          onClick={() => setMatchMode('all')}
+                          className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                            matchMode === 'all'
+                              ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.5)]'
+                              : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          Custom...
+                          Match ALL conditions
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMatchMode('any')}
+                          className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                            matchMode === 'any'
+                              ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.5)]'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Match ANY condition
                         </button>
                       </div>
                     </div>
 
-                    {/* Section 2b: Smart Date & Lifecycle Logic (When Date field detected) */}
-                    {(() => {
-                      const activeColName = conditions[0]?.field === '__custom__'
-                        ? (conditions[0]?.customField || 'Custom')
-                        : (conditions[0]?.field || activeField || availableColumns[0] || 'Type');
-                      const isDateCol = isDateField(activeColName);
-                      if (!isDateCol) return null;
-
-                      return (
-                        <div className="p-2.5 rounded-lg border border-cyan-500/30 bg-cyan-950/20 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
-                              <Clock className="h-3 w-3 text-cyan-400" />
-                              Quick Date Filter for &ldquo;{activeColName}&rdquo;:
-                            </span>
-                            <span className="text-[10px] font-semibold text-cyan-400/80">
-                              Live Runtime Filtering
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => applyDatePreset('overdue')}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-cyan-500/40 bg-slate-900 text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer"
-                              title="Due date has passed (Due Date <= Today)"
-                            >
-                              Overdue (on or before today)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyDatePreset('upcoming')}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-cyan-500/40 bg-slate-900 text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer"
-                              title="Due date has not arrived yet (Due Date >= Today)"
-                            >
-                              Upcoming (after today)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyDatePreset('today')}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-cyan-500/40 bg-slate-900 text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer"
-                              title="Due date is today"
-                            >
-                              Due Today
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Section 2c: Quick Detected Options for current field */}
-                    {(() => {
-                      const activeColName = conditions[0]?.field === '__custom__'
-                        ? (conditions[0]?.customField || '')
-                        : (conditions[0]?.field || activeField || availableColumns[0] || 'Type');
-                      const detectedValues = getValuesForField(activeColName);
-                      if (detectedValues.length === 0) return null;
-
-                      return (
-                        <div className="space-y-1.5 pt-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-                              <ListFilter className="h-3 w-3 text-cyan-400" />
-                              Detected Options for &ldquo;{activeColName}&rdquo;:
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {detectedValues.length} option(s)
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {detectedValues.map((v) => {
-                              const isValSelected = conditions.some((c) => c.value?.toLowerCase() === v.toLowerCase());
-                              return (
-                                <button
-                                  key={v}
-                                  type="button"
-                                  onClick={() => handleSelectValuePill(v)}
-                                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer ${
-                                    isValSelected
-                                      ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                                  }`}
-                                  title={`Filter by '${v}'`}
-                                >
-                                  {v}
-                                </button>
-                              );
-                            })}
-                            <button
-                              type="button"
-                              onClick={() => handleSelectValuePill('__all__')}
-                              className="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-700 transition cursor-pointer"
-                              title="Clear filter value"
-                            >
-                              Fetch All
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
                     {/* Condition Rows */}
-                    <div className="space-y-2">
-                      {conditions.map((cond, idx) => {
-                        const isCustom = cond.field === '__custom__';
-                        const isDate = cond.operator === 'dateBetween';
-                        const fieldNameForOptions = isCustom ? cond.customField : cond.field;
-                        const rowOptions = getValuesForField(fieldNameForOptions);
+                    <div className="space-y-2.5">
+                      {filterConditions.map((cond, idx) => (
+                        <div
+                          key={cond.id}
+                          className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 rounded-xl border border-slate-800 bg-[#0c1427] p-2.5"
+                        >
+                          <span className="text-[11px] font-bold text-cyan-400 px-1 shrink-0">
+                            {idx === 0 ? 'Where' : matchMode === 'all' ? 'AND' : 'OR'}
+                          </span>
 
-                        return (
-                          <div
-                            key={cond.id}
-                            className="p-2.5 rounded-lg border border-slate-800 bg-slate-900/80 space-y-2"
+                          {/* Column Select */}
+                          <select
+                            value={cond.field}
+                            onChange={(e) => handleUpdateCondition(cond.id, { field: e.target.value })}
+                            className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
                           >
-                            <div className="grid grid-cols-12 gap-2 items-center">
-                              {/* Field Dropdown */}
-                              <div className="col-span-4">
-                                <select
-                                  aria-label="Filter Field"
-                                  value={cond.field}
-                                  onChange={(e) => {
-                                    handleUpdateCondition(idx, { field: e.target.value });
-                                    if (idx === 0) setActiveField(e.target.value);
-                                  }}
-                                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                                >
-                                  {availableColumns.map((col) => (
-                                    <option key={col} value={col}>
-                                      {col}
-                                    </option>
-                                  ))}
-                                  <option value="__custom__">Custom column...</option>
-                                </select>
-                              </div>
+                            {availableColumns.map((col) => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                            <option value="__custom__">+ Custom field</option>
+                          </select>
 
-                              {/* Operator Dropdown */}
-                              <div className="col-span-3">
-                                <select
-                                  aria-label="Filter Operator"
-                                  value={cond.operator}
-                                  onChange={(e) => {
-                                    const nextOp = e.target.value as 'contains' | 'equals' | 'dateBetween';
-                                    handleUpdateCondition(idx, { operator: nextOp });
-                                  }}
-                                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 transition cursor-pointer"
-                                >
-                                  <option value="contains">contains</option>
-                                  <option value="equals">equals</option>
-                                  <option value="dateBetween">dateBetween</option>
-                                </select>
-                              </div>
+                          {cond.field === '__custom__' && (
+                            <input
+                              type="text"
+                              value={cond.customField}
+                              onChange={(e) => handleUpdateCondition(cond.id, { customField: e.target.value })}
+                              placeholder="Field name..."
+                              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                            />
+                          )}
 
-                              {/* Value Input or Date Pickers */}
-                              <div className={conditions.length > 1 ? 'col-span-4' : 'col-span-5'}>
-                                {isDate ? (
-                                  <div className="flex items-center gap-1">
-                                    <input
-                                      type="date"
-                                      aria-label="From Date"
-                                      value={cond.dateFrom}
-                                      onChange={(e) => handleUpdateCondition(idx, { dateFrom: e.target.value })}
-                                      className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-cyan-500"
-                                      title="From Date"
-                                    />
-                                    <span className="text-[10px] text-slate-500 shrink-0">to</span>
-                                    <input
-                                      type="date"
-                                      aria-label="To Date"
-                                      value={cond.dateTo}
-                                      onChange={(e) => handleUpdateCondition(idx, { dateTo: e.target.value })}
-                                      className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-cyan-500"
-                                      title="To Date"
-                                    />
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <input
-                                      type="text"
-                                      placeholder="Filter value..."
-                                      list={`datalist_${cond.id}`}
-                                      value={cond.value}
-                                      onChange={(e) => handleUpdateCondition(idx, { value: e.target.value })}
-                                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-                                    />
-                                    <datalist id={`datalist_${cond.id}`}>
-                                      {rowOptions.map((opt) => (
-                                        <option key={opt} value={opt} />
-                                      ))}
-                                    </datalist>
-                                  </div>
-                                )}
-                              </div>
+                          {/* Operator */}
+                          <select
+                            value={cond.operator}
+                            onChange={(e) => handleUpdateCondition(cond.id, { operator: e.target.value as any })}
+                            className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
+                          >
+                            <option value="contains">contains</option>
+                            <option value="equals">equals</option>
+                            <option value="dateBetween">date between</option>
+                          </select>
 
-                              {/* Remove Button */}
-                              {conditions.length > 1 && (
-                                <div className="col-span-1 flex justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveCondition(idx)}
-                                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded transition cursor-pointer"
-                                    title="Remove Condition"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              )}
+                          {/* Value Input */}
+                          {cond.operator === 'dateBetween' ? (
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <input
+                                type="date"
+                                value={cond.dateFrom}
+                                onChange={(e) => handleUpdateCondition(cond.id, { dateFrom: e.target.value })}
+                                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white"
+                              />
+                              <span className="text-slate-500 text-xs">to</span>
+                              <input
+                                type="date"
+                                value={cond.dateTo}
+                                onChange={(e) => handleUpdateCondition(cond.id, { dateTo: e.target.value })}
+                                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white"
+                              />
                             </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={cond.value}
+                              onChange={(e) => handleUpdateCondition(cond.id, { value: e.target.value })}
+                              placeholder="Filter value..."
+                              className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                            />
+                          )}
 
-                            {/* Quick Suggestion Chips under input */}
-                            {rowOptions.length > 0 && !isDate && (
-                              <div className="flex flex-wrap items-center gap-1 pt-1">
-                                <span className="text-[10px] text-slate-500">Suggested:</span>
-                                {rowOptions.slice(0, 5).map((opt) => (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => handleUpdateCondition(idx, { value: opt })}
-                                    className={`text-[10px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
-                                      cond.value === opt
-                                        ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Custom Column Input if selected */}
-                            {isCustom && (
-                              <div className="pt-1">
-                                <input
-                                  type="text"
-                                  placeholder="Enter exact column header name..."
-                                  value={cond.customField}
-                                  onChange={(e) => handleUpdateCondition(idx, { customField: e.target.value })}
-                                  className="w-full bg-slate-900 border border-cyan-500/40 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          {/* Remove button */}
+                          {filterConditions.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCondition(cond.id)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
 
-                    {/* Add Condition Button */}
-                    <div className="flex justify-end pt-1">
+                    <div className="flex items-center justify-between pt-1">
                       <button
                         type="button"
                         onClick={handleAddCondition}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 transition cursor-pointer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors"
                       >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span>Add Condition</span>
+                        <Plus className="h-4 w-4" />
+                        <span>Add Another Condition</span>
                       </button>
+
+                      <div className="flex items-center gap-1.5 rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>Targeting specific records</span>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* Workflow Summary Metadata */}
-          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400">
-            <span>Workflow ID: <code className="text-slate-300 font-mono">{workflow.id.slice(0, 8)}...</code></span>
-            <span>Recorded Steps: <span className="text-cyan-300 font-medium">{stepCount}</span></span>
-          </div>
-
-          {/* Error Banner */}
-          {error && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-              <span>{error}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800 bg-slate-950/50">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={submitting || Boolean(execMode === 'loop' && loopValidationError)}
-            onClick={handleLaunch}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs font-bold shadow-lg shadow-cyan-500/20 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {submitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5 fill-current" />
             )}
-            <span>{submitting ? 'Dispatching...' : 'Dispatch Execution'}</span>
-          </button>
+
+            {/* STEP 4: REVIEW & LAUNCH (Summary & Collapsible Advanced Settings) */}
+            {currentStep === 4 && (
+              <div className="space-y-5 animate-in fade-in duration-150">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Step 4 · Final Verification
+                  </span>
+                  <h2 className="text-xl font-bold text-white sm:text-2xl">
+                    Review & Launch Automation
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Verify your execution plan below. Everything is configured and ready to run.
+                  </p>
+                </div>
+
+                {/* Plan Summary Cards */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-cyan-500/20 bg-[#101b33]/80 p-4 space-y-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Execution Strategy</span>
+                    <div className="text-base font-bold text-white flex items-center gap-2">
+                      {execMode === 'standard' ? (
+                        <>
+                          <Play className="h-4 w-4 text-cyan-400 fill-current" />
+                          <span>Run Once (1x Execution)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Repeat className="h-4 w-4 text-cyan-400" />
+                          <span>Repeat Tasks (Batch Processing)</span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {execMode === 'standard'
+                        ? 'Executes recorded steps once sequentially'
+                        : `Repeating on "${selectedCollection}" with "${targetAction}" action`}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-cyan-500/20 bg-[#101b33]/80 p-4 space-y-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Target Data Scope</span>
+                    <div className="text-base font-bold text-white flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-cyan-400" />
+                      <span>
+                        {execMode === 'standard'
+                          ? 'Standard Single Pass'
+                          : recordScope === 'all'
+                          ? 'All Records (Entire Set)'
+                          : recordScope === 'new'
+                          ? 'Only New Records (NEW_ONLY)'
+                          : `Custom Filter (${filterConditions.length} rules)`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {isRunnerOnline ? 'Desktop Worker Online & Connected' : 'Waiting for desktop worker'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* COLLAPSIBLE ADVANCED SETTINGS ACCORDION */}
+                <div className="rounded-2xl border border-slate-800 bg-[#0e172a]/90 overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                    className="flex w-full items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Sliders className="h-4 w-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-white">
+                        Advanced Settings & Loop Fine-Tuning
+                      </span>
+                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                        Optional
+                      </span>
+                    </div>
+                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isAdvancedOpen && (
+                    <div className="border-t border-slate-800 p-5 space-y-5 text-xs">
+                      {/* Process Multiple Companies (Two-Level Iteration) */}
+                      <div className="space-y-3 rounded-xl border border-slate-800 bg-[#0c1427] p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-white">Process Multiple Companies</span>
+                            <p className="text-[11px] text-slate-400">
+                              Controlled two-level iteration across outer companies and inner records.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsTwoLevel(!isTwoLevel)}
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                              isTwoLevel ? 'bg-cyan-500' : 'bg-slate-700'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                isTwoLevel ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {isTwoLevel && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-800">
+                            <div>
+                              <label className="text-[11px] text-slate-400">Company Anchor Step</label>
+                              <select
+                                value={outerAnchorIndex}
+                                onChange={(e) => setOuterAnchorIndex(Number(e.target.value))}
+                                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
+                              >
+                                {steps.map((s, idx) => (
+                                  <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[11px] text-slate-400">Invoice Anchor Step</label>
+                              <select
+                                value={innerAnchorIndex}
+                                onChange={(e) => setInnerAnchorIndex(Number(e.target.value))}
+                                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
+                              >
+                                {steps.map((s, idx) => (
+                                  <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Batch Iteration Limits */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[11px] text-slate-400">Max Items Limit (How many items)</label>
+                          <input
+                            type="number"
+                            value={maxItems}
+                            onChange={(e) => setMaxItems(e.target.value)}
+                            placeholder="e.g. 50 (or leave empty for all)"
+                            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] text-slate-400">Collection Anchor Step</label>
+                          <select
+                            value={anchorStepIndex}
+                            onChange={(e) => setAnchorStepIndex(Number(e.target.value))}
+                            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
+                          >
+                            {steps.map((s, idx) => (
+                              <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* BOTTOM WIZARD CONTROLS */}
+            <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
+              <button
+                type="button"
+                onClick={() => setCurrentStep((prev) => (prev > 1 ? (prev - 1) as any : 1))}
+                disabled={currentStep === 1 || submitting}
+                className={`inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold transition-all ${
+                  currentStep === 1
+                    ? 'opacity-40 cursor-not-allowed text-slate-600'
+                    : 'border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white'
+                }`}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>Back</span>
+              </button>
+
+              <div className="flex items-center gap-3">
+                {currentStep < 4 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentStep === 1 && execMode === 'standard') {
+                        // Single execution doesn't need loop collection or filter steps
+                        setCurrentStep(4);
+                      } else {
+                        setCurrentStep((prev) => (prev < 4 ? (prev + 1) as any : 4));
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-2.5 text-xs font-bold text-black shadow-[0_0_18px_rgba(6,182,212,0.4)] hover:shadow-[0_0_24px_rgba(6,182,212,0.65)] hover:scale-[1.02] active:scale-[0.98] transition-all"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleDispatchExecution}
+                    disabled={submitting}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-500 px-7 py-3 text-sm font-extrabold text-slate-950 shadow-[0_0_28px_rgba(6,182,212,0.6)] hover:shadow-[0_0_36px_rgba(6,182,212,0.85)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-black" />
+                        <span>Dispatching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4 fill-current ml-0.5" />
+                        <span>Dispatch Execution</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
+          </div>
         </div>
+
       </div>
     </div>
   );
 }
+
+export default ExecutionPreflightModal;

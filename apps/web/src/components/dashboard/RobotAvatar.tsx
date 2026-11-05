@@ -4,10 +4,15 @@ import React from 'react';
 
 export type RobotState = 'idle' | 'running' | 'success' | 'error' | 'analyzing' | 'warning' | 'waiting';
 export type RobotSize = 'mini' | 'badge' | 'card' | 'medium' | 'hero' | number;
+export type RobotVariant = 'svg' | '3d';
+
+export const REFLOW_MASCOT_URL = 'https://lh3.googleusercontent.com/aida-public/AB6AXuAqqQXscI_PGcUPnIEjqJO4o4tCjr3n8ei4FNQTOGtY2YofbORwfsA3kYJZoQR4tSoCihGF-qq0Rhz2yGZxWsdJPrii-KxoXwptkx3a4cd6ld3NEzEqi-Th98TtRDqgghPWrTeZPweB78Kp-E4jjZuNLynRaK-pK9ywVr9eHxSwZMDhezhDEU4nVhZHbXrCiq1djLvfl4rYhzitS2a0cFbiSMGbm3WLkSn00lDA6TJM';
+export const REFLOW_MASCOT_INSPECTING_URL = 'https://lh3.googleusercontent.com/aida-public/AB6AXuCFrBgprv4VHGk3CBfZRM9F5uSqpTT4JWlmt0t19eg5E9m7xt_2DJyz8BjhAeI6mt3HsltWe0A4TVRPPOKXkdTwRnWtXaKlQGJ2hs966Hl8n-YzN-gp-_pzz9HdoCb-LmKu0uL3fYrm7QLpP-mgA6ghK5K5REwNtdoT7xFmYKgt4njWnViSlBf52bsk8PNWU3CmTCuh8dnBBQDfRmNN4y13a-UHmYHtwUwX8nxu4Jx7';
 
 interface RobotAvatarProps {
   size?: RobotSize;
   state?: RobotState;
+  variant?: RobotVariant;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -15,10 +20,12 @@ interface RobotAvatarProps {
 export function RobotAvatar({
   size = 'badge',
   state = 'idle',
+  variant = '3d',
   className = '',
   style = {}
 }: RobotAvatarProps) {
   const uid = React.useId().replace(/:/g, '');
+  const [imgError, setImgError] = React.useState(false);
   // Dimensions
   let width = 34;
   let height = 38;
@@ -40,6 +47,27 @@ export function RobotAvatar({
   } else if (typeof size === 'number') {
     width = size;
     height = Math.round(size * 1.125);
+  }
+
+  // If 3d mascot variant is selected and image loads successfully
+  if (variant === '3d' && !imgError && (size === 'card' || size === 'medium' || size === 'hero' || typeof size === 'number' || size === 'badge' || size === 'mini')) {
+    return (
+      <div
+        className={`inline-flex items-center justify-center select-none flex-shrink-0 relative group ${className}`}
+        style={{ width, height, ...style }}
+        aria-hidden="true"
+      >
+        <img
+          src={state === 'analyzing' ? REFLOW_MASCOT_INSPECTING_URL : REFLOW_MASCOT_URL}
+          alt="ReFlow Assistant Mascot"
+          className="w-full h-full object-contain filter drop-shadow-[0_4px_12px_rgba(6,182,212,0.35)] transition-transform duration-300 group-hover:scale-105"
+          onError={() => setImgError(true)}
+        />
+        {state === 'running' && (
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-cyan-400 ring-2 ring-[#0b1326] animate-pulse" />
+        )}
+      </div>
+    );
   }
 
   // Accent colors based on state
