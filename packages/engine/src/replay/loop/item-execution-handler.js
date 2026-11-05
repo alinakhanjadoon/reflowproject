@@ -82,6 +82,8 @@ class ItemExecutionHandler {
     this.defaultClickWaitMs = Number.isInteger(options.defaultClickWaitMs)
       ? options.defaultClickWaitMs
       : 2500;
+    this.newOnly = options.newOnly === true || options.new_only === true;
+    this.forceRedownload = options.forceRedownload === true;
   }
 
   /**
@@ -1001,9 +1003,10 @@ class ItemExecutionHandler {
 
           const isDownloadAction = actionType === 'CLICK' && Boolean(downloadsDir) && ItemExecutionHandler.isDownloadPotentialAction(action, targetItem);
           const forceRedownload = runner?.forceRedownload === true || this.forceRedownload === true;
+          const isNewOnly = runner?.newOnly === true || this.newOnly === true;
 
-          // Deduplication: If this download action already succeeded for this record, do not re-download
-          if (isDownloadAction && !forceRedownload) {
+          // Deduplication: Only skip if user explicitly requested NEW_ONLY processing
+          if (isDownloadAction && !forceRedownload && isNewOnly) {
             const alreadyDownloaded = (runner && typeof runner.checkIfAlreadyDownloaded === 'function')
               ? runner.checkIfAlreadyDownloaded(itemIdentifier.itemKey, itemIdentifier.invoiceNumber, targetItem.fields || {})
               : (this.artifactDownloadManager?.checkIfAlreadyDownloaded
@@ -1085,11 +1088,26 @@ class ItemExecutionHandler {
 
             try {
               if (replayEngine) {
-                await replayEngine.executeActionWithinItem(
-                  itemElement,
-                  action,
-                  effectiveLoopStepIndex + actionOffset
-                );
+                try {
+                  await replayEngine.executeActionWithinItem(
+                    itemElement,
+                    action,
+                    effectiveLoopStepIndex + actionOffset
+                  );
+                } catch (withinItemErr) {
+                  // Fallback: If action was marked item-scoped but could not be resolved inside the row
+                  // (e.g. table header download button, toolbar button, or modal dialog),
+                  // fall back to executing it at the page level.
+                  if (withinItemErr.message && /Could not resolve action target inside collection item/i.test(withinItemErr.message)) {
+                    logger.warn(`[Loop Runner] executeActionWithinItem failed for item #${i + 1} (${withinItemErr.message}); falling back to page-level execution`);
+                    await replayEngine.executeAction(
+                      action,
+                      effectiveLoopStepIndex + actionOffset
+                    );
+                  } else {
+                    throw withinItemErr;
+                  }
+                }
               }
 
               // Only enforce single selection when there is NO explicit recorded selection step

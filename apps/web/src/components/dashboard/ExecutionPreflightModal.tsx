@@ -690,7 +690,7 @@ export function ExecutionPreflightModal({
         org_id: orgId,
         status: 'pending',
         total_items_discovered: itemsLimit || 0,
-        mode: execMode,
+        mode: execMode === 'standard' ? 'single' : 'loop',
         isLoop: execMode === 'loop',
         loopStepIndex: execMode === 'loop' ? (isTwoLevel ? innerAnchorIndex : anchorStepIndex) : null,
         loop: execMode === 'loop' ? {

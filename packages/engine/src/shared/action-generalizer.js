@@ -110,17 +110,26 @@ class ActionGeneralizer {
       return false;
     }
 
+    // Exclude table headers (thead, th): header checkboxes, header download buttons, and columnheader actions
+    // are shared page-level controls, not inside individual data rows (tbody > tr).
+    const fpParentTag = String(fp.parentTag || '').toLowerCase();
+    const fpTag = String(fp.tagName || '').toLowerCase();
+    if (fpTag === 'th' || fpParentTag === 'th' || fpParentTag === 'thead' || fpRole === 'columnheader') {
+      return false;
+    }
+    if (candidates.some(c => c?.value && /\b(thead\b|th\b|th[:.\[\s]|role=["']columnheader["'])/i.test(c.value))) {
+      return false;
+    }
+
     const tag = String(collection.itemTag).toLowerCase();
 
     // Check if fingerprint directly matches the item or known child elements
-    const fpTag = String(fp.tagName || '').toLowerCase();
     if (fpTag === tag) return true;
     if (tag === 'mat-option' && (fpTag === 'mat-pseudo-checkbox' || fp.role === 'option')) return true;
-    if (tag === 'tr' && (fpTag === 'td' || fpTag === 'th')) return true;
+    if (tag === 'tr' && fpTag === 'td') return true;
 
     // Check parent tag evidence in fingerprint
-    const fpParentTag = String(fp.parentTag || '').toLowerCase();
-    if (tag === 'tr' && (fpParentTag === 'td' || fpParentTag === 'th' || fpParentTag === 'tr')) {
+    if (tag === 'tr' && (fpParentTag === 'td' || fpParentTag === 'tr')) {
       return true;
     }
 
@@ -132,11 +141,12 @@ class ActionGeneralizer {
     // Check candidates for item-relative CSS paths or XPath ancestry
     for (const candidate of candidates) {
       if (!candidate || !candidate.value) continue;
+      if (/\bthead\b|\bth\b|\[@role=['"]columnheader['"]\]/i.test(candidate.value)) continue;
       if (this.toRelativeCss(candidate.value, tag)) return true;
       if (this.toRelativeXPath(candidate.value, tag)) return true;
       const val = String(candidate.value).trim().toLowerCase();
       if (candidate.strategy === 'xpath' || val.startsWith('/') || val.startsWith('(')) {
-        if (val.includes(`//${tag}`) || val.includes(`/${tag}/`) || val.includes(`/${tag}[`)) {
+        if ((val.includes(`//${tag}`) || val.includes(`/${tag}/`) || val.includes(`/${tag}[`)) && !val.includes('thead')) {
           return true;
         }
       }
@@ -156,7 +166,7 @@ class ActionGeneralizer {
 
     // In-record interactive elements (buttons, links, inputs, checkboxes)
     // inside the repeating range with parent cell or inRow context
-    if (action.isDownload || action.inRow) {
+    if (action.inRow) {
       return true;
     }
 
@@ -260,6 +270,7 @@ class ActionGeneralizer {
    */
   static toRelativeXPath(xpath, itemTag) {
     if (typeof xpath !== 'string' || !xpath.trim()) return null;
+    if (/\/thead\b|\/th\b|\[@role=['"]columnheader['"]\]/i.test(xpath)) return null;
     const tag = String(itemTag || 'tr').toLowerCase().trim();
     if (!tag) return null;
 
@@ -280,6 +291,7 @@ class ActionGeneralizer {
    */
   static toRelativeCss(cssPath, itemTag) {
     if (typeof cssPath !== 'string' || !cssPath.trim()) return null;
+    if (/\bthead\b|\bth\b/i.test(cssPath)) return null;
 
     const rawTag = String(itemTag || '').toLowerCase().trim();
     if (!rawTag) return null;

@@ -102,6 +102,30 @@ function run() {
   assert.strictEqual(genStatic.target.candidates[0].value, '[id="download-btn"]');
   console.log('  ✅ In-row static ID item-scoping passed\n');
 
+  console.log('🔹 Test 9: Table header download button in <th> is page-scoped, not item-scoped');
+  const headerDownloadAction = {
+    type: 'CLICK',
+    name: 'Download Button',
+    isDownload: true,
+    target: {
+      candidates: [
+        { strategy: 'css-path', value: 'table thead th.mat-column-select button.mat-icon-button' },
+        { strategy: 'xpath', value: '//table//thead//th[contains(@class,"mat-column-select")]//button' }
+      ],
+      fingerprint: {
+        tagName: 'button',
+        parentTag: 'th',
+        role: 'button',
+        className: 'mat-focus-indicator mat-icon-button'
+      }
+    }
+  };
+  const isHeaderRelative = ActionGeneralizer.isItemRelative(headerDownloadAction, { itemTag: 'tr' });
+  assert.strictEqual(isHeaderRelative, false, 'Header download button must NOT be item-relative');
+  const genHeader = ActionGeneralizer.generalizeAction(headerDownloadAction, { itemTag: 'tr' });
+  assert.strictEqual(genHeader.scope, 'page', 'Header download button must be page-scoped');
+  console.log('  ✅ Table header download button page-scoping passed\n');
+
   console.log('🎉 ALL ACTION GENERALIZER TESTS PASSED SUCCESSFULLY!\n');
 }
 

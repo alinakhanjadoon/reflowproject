@@ -142,11 +142,12 @@ export async function POST(request: NextRequest) {
     // Determine loop execution mode
     const hasExplicitMode = body.mode !== undefined || body.isLoop !== undefined;
     const isLoopCandidate = loopSignals.isLoop;
+    const rawMode = body.mode === 'standard' ? 'single' : body.mode;
     const mode = hasExplicitMode
-      ? (body.mode || (body.isLoop ? 'loop' : 'single'))
+      ? (rawMode || (body.isLoop ? 'loop' : 'single'))
       : (loopConfig?.enabled ? 'loop' : (isLoopCandidate ? 'loop' : 'single'));
     const isLoop = hasExplicitMode
-      ? Boolean(body.isLoop ?? (mode === 'loop'))
+      ? (body.isLoop !== undefined ? Boolean(body.isLoop) : mode === 'loop')
       : (loopConfig ? Boolean(loopConfig.enabled) : isLoopCandidate);
 
     // Determine loop step index

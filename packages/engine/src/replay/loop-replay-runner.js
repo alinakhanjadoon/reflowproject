@@ -95,7 +95,23 @@ class LoopReplayRunner {
         enabled: options.loop.enabled !== false
       };
     }
-    if (this.loopConfig && this.loopConfig.enabled) {
+    const isExplicitSingle = options.isLoop === false ||
+      options.mode === 'single' ||
+      options.mode === 'standard' ||
+      (options.loop && options.loop.enabled === false);
+
+    if (isExplicitSingle) {
+      this.isLoop = false;
+      this.mode = 'single';
+      this.loopStepIndex = null;
+      this.loopConfig = {
+        enabled: false,
+        anchorStepIndex: null,
+        startStepIndex: null,
+        endStepIndex: null,
+        maxItems: null
+      };
+    } else if (this.loopConfig && this.loopConfig.enabled) {
       this.isLoop = true;
       this.mode = 'loop';
       if (Number.isInteger(this.loopConfig.anchorStepIndex)) {
@@ -104,10 +120,6 @@ class LoopReplayRunner {
       if (Number.isInteger(this.loopConfig.maxItems) && !this.maxItems) {
         this.maxItems = this.loopConfig.maxItems;
       }
-    } else if (options.loop && options.loop.enabled === false) {
-      this.isLoop = false;
-      this.mode = 'single';
-      this.loopStepIndex = null;
     } else {
       this.loopStepIndex = Number.isInteger(options.loopStepIndex) ? options.loopStepIndex : (this.loopConfig?.anchorStepIndex ?? null);
       this.isLoop = options.isLoop === true || options.mode === 'loop' || Boolean(this.loopConfig?.enabled);
@@ -190,7 +202,9 @@ class LoopReplayRunner {
       downloadManager: this.artifactDownloadManager,
       stateCoordinator: this.loopStateCoordinator,
       replayEngine: this.replayEngine,
-      getIsAborted: () => this.isAborted
+      getIsAborted: () => this.isAborted,
+      newOnly: this.newOnly,
+      forceRedownload: this.forceRedownload
     });
   }
 
@@ -250,6 +264,14 @@ class LoopReplayRunner {
       workflow.actions ||
       [];
 
+    const isExplicitSingle = options.isLoop === false ||
+      options.mode === 'single' ||
+      options.mode === 'standard' ||
+      (options.loop && options.loop.enabled === false) ||
+      workflow.mode === 'single' ||
+      workflow.mode === 'standard' ||
+      workflow.isLoop === false;
+
     const workflowWithOpts = {
       ...workflow,
       ...(this.isLoop ? { isLoop: this.isLoop, mode: this.mode, loopStepIndex: this.loopStepIndex, loopLimit: this.loopLimit } : {}),
@@ -258,8 +280,19 @@ class LoopReplayRunner {
       ...(options.loopStepIndex !== undefined ? { loopStepIndex: options.loopStepIndex } : {}),
       ...(options.loopLimit !== undefined ? { loopLimit: options.loopLimit } : {}),
     };
-    if (workflow.loop) workflowWithOpts.loop = workflow.loop;
-    else if (options.loop) workflowWithOpts.loop = options.loop;
+
+    if (isExplicitSingle) {
+      workflowWithOpts.isLoop = false;
+      workflowWithOpts.mode = 'single';
+      workflowWithOpts.loop = { enabled: false };
+      this.isLoop = false;
+      this.mode = 'single';
+      this.loopConfig = { enabled: false, anchorStepIndex: null, startStepIndex: null, endStepIndex: null, maxItems: null };
+      return this.executeStandard(workflow, options.onProgress);
+    }
+
+    if (options.loop) workflowWithOpts.loop = options.loop;
+    else if (workflow.loop) workflowWithOpts.loop = workflow.loop;
     else if (this.loopConfig?.enabled) workflowWithOpts.loop = this.loopConfig;
 
     const effectiveConfig = LoopDetector.deriveLoopConfig(

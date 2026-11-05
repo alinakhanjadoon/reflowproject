@@ -305,7 +305,7 @@ class RunnerDaemon {
       const candidateStepIdx = LoopDetector.findLoopCandidateIndex(steps);
       const stepsHasLoop = steps.some(s => s && (s.role === 'LOOP' || s.isLoop || s.loopMode === 'sequential_iteration'));
 
-      const isExplicitSingle = run.mode === 'single' || run.is_loop === false || run.isLoop === false;
+      const isExplicitSingle = run.mode === 'single' || run.mode === 'standard' || run.is_loop === false || run.isLoop === false;
       const isExplicitLoop = run.mode === 'loop' || run.is_loop === true || run.isLoop === true;
 
       const isLoop = !isExplicitSingle && (isExplicitLoop || Boolean(
@@ -317,9 +317,9 @@ class RunnerDaemon {
         stepsHasLoop ||
         (candidateStepIdx >= 0 && def.mode === 'loop')
       ));
-      const mode = (run.mode === 'loop' || run.mode === 'single')
-        ? run.mode
-        : (isLoop ? 'loop' : (def.mode || 'single'));
+      const mode = (run.mode === 'loop' || run.mode === 'single' || run.mode === 'standard')
+        ? (run.mode === 'standard' ? 'single' : run.mode)
+        : (isLoop ? 'loop' : (def.mode === 'standard' ? 'single' : (def.mode || 'single')));
 
       // Resolve filter and loop parameters from run, definition, and filter_rules
       const { resolveItemFilter } = require('../shared/item-filter');

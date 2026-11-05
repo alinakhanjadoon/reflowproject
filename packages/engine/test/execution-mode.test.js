@@ -33,6 +33,22 @@ async function runExecutionModeTests() {
   assert.strictEqual(runner2.isLoop, false, 'Explicit isLoop must be false');
   console.log('  ✅ Explicit single mode confirmed\n');
 
+  // Test 2b: Standard Run (mode: 'standard') resolves to single execution even if workflow has saved loop config
+  console.log('🔹 Test 2b: Standard Run (mode: "standard") resolves to single execution');
+  const runner2b = new LoopReplayRunner({
+    runId: 'run_standard_2b',
+    workflowId: 'wf_standard_2b',
+    mode: 'standard',
+    workflow: {
+      id: 'wf_standard_2b',
+      loop: { enabled: true, anchorStepIndex: 1, startStepIndex: 1, endStepIndex: 2 }
+    }
+  });
+  assert.strictEqual(runner2b.mode, 'single', 'mode: "standard" must resolve to single');
+  assert.strictEqual(runner2b.isLoop, false, 'mode: "standard" must enforce isLoop: false');
+  assert.strictEqual(runner2b.loopConfig.enabled, false, 'loopConfig must be disabled for standard run');
+  console.log('  ✅ Standard run mode confirmed as strictly single\n');
+
   // Test 3: Explicit loop mode request resolves to loop with loopStepIndex
   console.log('🔹 Test 3: Explicit loop mode request');
   const runner3 = new LoopReplayRunner({

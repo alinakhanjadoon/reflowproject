@@ -474,6 +474,21 @@ class LoopDetector {
 
     const stepCount = steps.length;
 
+    // Check explicit loop disabled or single/standard mode first
+    // Priority: def-level explicit setting takes precedence over stored workflow defaults
+    const isExplicitlyDisabled = def.isLoop === false || def.mode === 'single' || def.mode === 'standard' ||
+      (def.isLoop === undefined && def.mode === undefined && (metadata.isLoop === false || metadata.mode === 'single' || metadata.mode === 'standard')) ||
+      (def.loop && def.loop.enabled === false);
+    if (isExplicitlyDisabled) {
+      return {
+        enabled: false,
+        anchorStepIndex: null,
+        startStepIndex: null,
+        endStepIndex: null,
+        maxItems: null
+      };
+    }
+
     // Check if explicitly configured via unified `loop` object
     const explicitLoop = (def.loop && typeof def.loop === 'object') ? def.loop : (metadata.loop && typeof metadata.loop === 'object' ? metadata.loop : null);
     if (explicitLoop) {
@@ -508,20 +523,6 @@ class LoopDetector {
           maxItems
         };
       }
-    }
-
-    // Check explicit loop: false
-    // Priority: def-level explicit setting takes precedence over recorder metadata defaults
-    const isExplicitlyDisabled = def.isLoop === false || def.mode === 'single' ||
-      (def.isLoop === undefined && def.mode === undefined && (metadata.isLoop === false || metadata.mode === 'single'));
-    if (isExplicitlyDisabled) {
-      return {
-        enabled: false,
-        anchorStepIndex: null,
-        startStepIndex: null,
-        endStepIndex: null,
-        maxItems: null
-      };
     }
 
     // Derive from legacy or step signals
