@@ -9,31 +9,25 @@ import {
   AlertCircle,
   CheckCircle2,
   Cpu,
-  Settings2,
   Globe,
   Loader2,
   Plus,
   Trash2,
   RefreshCw,
   Clock,
-  Eye,
   Check,
   ChevronRight,
   ChevronLeft,
-  ChevronDown,
   Sparkles,
-  Download,
-  CheckSquare,
-  FileCode,
   Filter,
-  Sliders,
-  Info,
   Calendar,
   Layers3,
   Flame,
   ArrowRight,
-  HelpCircle,
-  Table as TableIcon
+  Sliders,
+  CheckSquare,
+  FileCode,
+  Tag
 } from 'lucide-react';
 import { Workflow } from '@/lib/types/database';
 import { DrawerRunItem } from './RunDetailsDrawer';
@@ -119,79 +113,66 @@ function detectTwoLevelCandidates(steps: Array<any>): {
       /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|li:nth-child|data-company)\b/i.test(selectors)
     );
 
-    const isTableRowOrGrid = Boolean(
-      tag === 'TR' || tag === 'TD' ||
-      role === 'row' || role === 'gridcell' ||
-      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors) ||
-      /\b(table\s*row|grid\s*row|invoice\s*row|row\s*item)\b/i.test(text)
+    const isCompanyKeyword = /(company|customer|account|location|organization|org\b|client)/i.test(text) ||
+      /(company|customer|account)/i.test(selectors);
+
+    if (dropdownStepIndex === -1 && (isOptionOrDropdown || (isCompanyKeyword && (s.action === 'CLICK' || s.type === 'CLICK' || s.action === 'SELECT')))) {
+      dropdownStepIndex = i;
+      continue;
+    }
+
+    const isTableOrRow = Boolean(
+      tag === 'TR' || tag === 'TD' || role === 'row' || role === 'gridcell' ||
+      /\b(tr\b|tbody|x-grid|table|gridcell|ui-grid|row)\b/i.test(selectors) ||
+      s.role === 'LOOP' || s.isLoop || s.extract_table
     );
 
-    if (dropdownStepIndex === -1 && isOptionOrDropdown) {
-      dropdownStepIndex = i;
-    }
-    if (isTableRowOrGrid) {
-      tableStepIndex = i;
+    const isRecordKeyword = /(invoice|record|bill|order|item|document|statement|entry|row)/i.test(text);
+
+    if (dropdownStepIndex !== -1 && tableStepIndex === -1 && i > dropdownStepIndex) {
+      if (isTableOrRow || isRecordKeyword) {
+        tableStepIndex = i;
+        break;
+      }
     }
   }
 
-  const hasTwoLevel = dropdownStepIndex >= 0 && tableStepIndex > dropdownStepIndex;
+  const hasTwoLevel = dropdownStepIndex !== -1 && tableStepIndex !== -1 && tableStepIndex > dropdownStepIndex;
   return { hasTwoLevel, dropdownStepIndex, tableStepIndex };
 }
 
-function detectLoopCandidate(steps: Array<any>, savedIndex?: unknown): number {
+function detectLoopCandidate(steps: Array<any>): number {
   if (!Array.isArray(steps) || steps.length === 0) return 0;
-  if (typeof savedIndex === 'number' && Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < steps.length) {
-    return savedIndex;
-  }
 
-  const twoLevel = detectTwoLevelCandidates(steps);
-
-  const roleIdx = steps.findIndex(
-    (s: any) => s && (s.role === 'LOOP' || s.isLoopCandidate === true || s.isLoop === true || s.loopMode === 'sequential_iteration')
-  );
-  if (roleIdx >= 0) {
-    if (twoLevel.hasTwoLevel && roleIdx === twoLevel.dropdownStepIndex) {
-      return twoLevel.tableStepIndex;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.role === 'LOOP' || s.isLoop || s.isLoopCandidate || s.loopMode === 'sequential_iteration') {
+      return i;
     }
-    return roleIdx;
   }
 
-  const isAuthOrSetup = (s: any) => {
-    if (!s) return false;
-    const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
-    const type = String(s.type || s.action || '').toUpperCase();
-    const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toLowerCase();
-    const inputType = String(s.target?.fingerprint?.type || s.fingerprint?.type || '').toLowerCase();
-    if (type === 'NAVIGATE' || type === 'SCROLL' || /scroll/i.test(name)) return true;
-    if (/(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) return true;
-    if (tag === 'input' && (inputType === 'password' || inputType === 'email')) return true;
-    return false;
-  };
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const type = (s.type || s.action || '').toUpperCase();
+    if (type === 'EXTRACT_TABLE' || type === 'EXTRACT_TEXT' || type === 'LOOP_START') {
+      return i;
+    }
+  }
 
-  const businessSteps = steps.filter((s: any, idx: number) => idx > 0 && !isAuthOrSetup(s));
-  const candidatePool = businessSteps.length > 0 ? businessSteps : steps;
-
-  for (const s of candidatePool) {
-    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
-    const selectors = candidates.map((c: any) => c.value || '').join(' ');
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
     const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
     const role = (s.target?.fingerprint?.role || '').toLowerCase();
+    const text = (s.name || s.elementName || s.description || '').toLowerCase();
+    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+    const selectors = candidates.map((c: any) => c.value || '').join(' ');
 
-    const isTable = Boolean(
-      tag === 'TR' || tag === 'TD' ||
-      role === 'row' || role === 'gridcell' ||
-      /\b(table\[\d+\]|table:nth-of-type|tbody\s*>\s*tr|tr:nth-(?:child|of-type)|\[role=["']row["']\]|\[role=["']gridcell["']\]|\.x-grid-row|\.x-grid-item|\.x-grid-cell|\.data-row|\.grid-row)\b/i.test(selectors)
-    );
-    if (isTable) {
-      const idx = steps.indexOf(s);
-      if (idx >= 0) return idx;
-    }
+    if (tag === 'TR' || tag === 'TD' || role === 'row' || role === 'gridcell') return i;
+    if (/\b(tr:nth-child|tbody\s*>\s*tr|x-grid-row|row-\d+|item-\d+|\[role=["']row["']\])\b/i.test(selectors)) return i;
+    if (text.includes('checkbox') || text.includes('row') || text.includes('invoice') || text.includes('item')) return i;
   }
 
-  const nonLoginIdx = steps.findIndex((s: any, idx: number) => idx > 0 && !isAuthOrSetup(s));
-  if (nonLoginIdx >= 0) return nonLoginIdx;
-
-  return steps.length > 1 ? 1 : 0;
+  return 0;
 }
 
 const EXPANDER_GLYPH_REGEX = /^[▸►▶▼▽▾+\-±›❯»⮞⌄v><\u25B6\u25BC\u25B8\u25BE\u276F\u203A\s]+$/i;
@@ -358,15 +339,14 @@ export function ExecutionPreflightModal({
 }: ExecutionPreflightModalProps) {
   const { orgId, isRunnerOnline, refreshDashboard, openRunDetails } = useDashboard();
 
-  // Wizard Step Tracker: 1 = Mode, 2 = Collection & Actions, 3 = Records & Filters, 4 = Review & Launch
+  // Wizard Step Tracker: 1 = Mode, 2 = Loop Steps, 3 = Filters & Limits, 4 = Review & Dispatch
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Core execution configuration
   const [execMode, setExecMode] = useState<'standard' | 'loop'>('standard');
   const [newOnly, setNewOnly] = useState(false);
-  const [recordScope, setRecordScope] = useState<'all' | 'new' | 'custom'>('all');
-  const [targetAction, setTargetAction] = useState<'download' | 'select' | 'process'>('download');
-  const [selectedCollection, setSelectedCollection] = useState<string>('primary_table');
+  const [filterEnabled, setFilterEnabled] = useState(false);
+  const [activeField, setActiveField] = useState<string>('Type');
 
   // Filter configuration
   const [filterConditions, setFilterConditions] = useState<FilterConditionRow[]>([
@@ -382,8 +362,7 @@ export function ExecutionPreflightModal({
   ]);
   const [matchMode, setMatchMode] = useState<'all' | 'any'>('all');
 
-  // Advanced settings & bounds
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  // Limits & bounds
   const [maxItems, setMaxItems] = useState<string>('');
   const [anchorStepIndex, setAnchorStepIndex] = useState<number>(0);
   const [startStepIndex, setStartStepIndex] = useState<number>(0);
@@ -403,14 +382,14 @@ export function ExecutionPreflightModal({
   // Scan & Column metadata
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [fieldValuesMap, setFieldValuesMap] = useState<Record<string, string[]>>({});
-  const [discoveredRecords, setDiscoveredRecords] = useState<any[]>([]);
-  const [discoveredItemCount, setDiscoveredItemCount] = useState<number>(0);
   const [scanningColumns, setScanningColumns] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Extract workflow steps
   const steps = useMemo(() => getWorkflowSteps(workflow), [workflow]);
+  const twoLevelInfo = useMemo(() => detectTwoLevelCandidates(steps), [steps]);
 
   // Initialize settings when workflow opens
   useEffect(() => {
@@ -418,21 +397,24 @@ export function ExecutionPreflightModal({
 
     setCurrentStep(1);
     setError(null);
+    setScanMessage(null);
 
     const initialColumns = extractWorkflowColumns(workflow);
     setAvailableColumns(initialColumns);
+    if (initialColumns[0]) {
+      setActiveField(initialColumns[0]);
+    }
 
     const valuesMap = extractFieldValuesMap(workflow);
     setFieldValuesMap(valuesMap);
 
     const wd = (workflow.workflow_definition || {}) as Record<string, unknown>;
-    const twoLevelCand = detectTwoLevelCandidates(steps);
 
     // Check shared loop signal
     const signals = deriveLoopSignals(wd);
     const hasLoopSignal = signals.isLoop;
 
-    if (hasLoopSignal || twoLevelCand.hasTwoLevel) {
+    if (hasLoopSignal || twoLevelInfo.hasTwoLevel) {
       setExecMode('loop');
     } else {
       setExecMode('standard');
@@ -443,14 +425,16 @@ export function ExecutionPreflightModal({
     setStartStepIndex(detectedAnchor);
     setEndStepIndex(steps.length > 0 ? steps.length - 1 : 0);
 
-    if (twoLevelCand.hasTwoLevel) {
+    if (twoLevelInfo.hasTwoLevel) {
       setIsTwoLevel(true);
-      setOuterAnchorIndex(twoLevelCand.dropdownStepIndex);
-      setOuterStartIndex(twoLevelCand.dropdownStepIndex);
+      setOuterAnchorIndex(twoLevelInfo.dropdownStepIndex);
+      setOuterStartIndex(twoLevelInfo.dropdownStepIndex);
       setOuterEndIndex(steps.length > 0 ? steps.length - 1 : 0);
-      setInnerAnchorIndex(twoLevelCand.tableStepIndex);
-      setInnerStartIndex(twoLevelCand.tableStepIndex);
-      setInnerEndIndex(Math.max(twoLevelCand.tableStepIndex, steps.length - 1));
+      setInnerAnchorIndex(twoLevelInfo.tableStepIndex);
+      setInnerStartIndex(twoLevelInfo.tableStepIndex);
+      setInnerEndIndex(Math.max(twoLevelInfo.tableStepIndex, steps.length - 1));
+    } else {
+      setIsTwoLevel(false);
     }
 
     // Set initial filter condition from discovered values
@@ -469,16 +453,7 @@ export function ExecutionPreflightModal({
         }
       ]);
     }
-  }, [isOpen, workflow, steps]);
-
-  // Keep newOnly state in sync with recordScope
-  useEffect(() => {
-    if (recordScope === 'new') {
-      setNewOnly(true);
-    } else {
-      setNewOnly(false);
-    }
-  }, [recordScope]);
+  }, [isOpen, workflow, steps, twoLevelInfo]);
 
   // Live filter condition manipulation
   const handleAddCondition = () => {
@@ -518,9 +493,151 @@ export function ExecutionPreflightModal({
     );
   };
 
+  const getValuesForField = (fieldName: string): string[] => {
+    if (!fieldName) return [];
+    const norm = fieldName.trim().toLowerCase();
+    for (const [k, vals] of Object.entries(fieldValuesMap)) {
+      if (k.trim().toLowerCase() === norm) {
+        return vals;
+      }
+    }
+    return [];
+  };
+
+  const handleSelectColumnPill = (col: string) => {
+    setActiveField(col);
+    if (filterConditions.length > 0) {
+      if (col === '__custom__') {
+        handleUpdateCondition(filterConditions[0].id, { field: '__custom__' });
+      } else {
+        handleUpdateCondition(filterConditions[0].id, { field: col, customField: '' });
+      }
+    }
+  };
+
+  const handleSelectValuePill = (val: string) => {
+    if (filterConditions.length > 0) {
+      handleUpdateCondition(filterConditions[0].id, { value: val });
+    }
+  };
+
+  // Re-scan columns from bridge or cloud
+  const handleRefreshFields = async () => {
+    if (!workflow) return;
+    setScanningColumns(true);
+    setScanMessage(null);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+      let res = await fetch('http://127.0.0.1:49152/discover', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          workflow,
+          loopStepIndex: anchorStepIndex,
+          anchorStepIndex,
+          url: workflow.portal_url
+        })
+      }).catch(() => null);
+
+      if (!res || !res.ok) {
+        res = await fetch(`/api/v1/workflows/${workflow.id}/discover`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => null);
+      }
+      clearTimeout(timeoutId);
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null);
+        const discovered = new Set<string>();
+        const nextValMap: Record<string, string[]> = {};
+        const appendVal = (col: string, val: unknown) => {
+          const clean = cleanStringValue(val);
+          if (!clean) return;
+          const k = col.trim();
+          if (!nextValMap[k]) nextValMap[k] = [];
+          if (!nextValMap[k].includes(clean)) {
+            nextValMap[k] = [...nextValMap[k], clean].slice(0, 30);
+          }
+        };
+
+        if (data?.availableFields && Array.isArray(data.availableFields)) {
+          data.availableFields.forEach((f: any) => {
+            if (typeof f === 'string' && f.trim()) discovered.add(f.trim());
+          });
+        }
+        if (data?.items && Array.isArray(data.items)) {
+          data.items.slice(0, 20).forEach((item: any) => {
+            if (item && typeof item === 'object') {
+              Object.entries(item).forEach(([k, v]) => {
+                discovered.add(k);
+                appendVal(k, v);
+              });
+            }
+          });
+        }
+
+        if (discovered.size > 0) {
+          const newCols = Array.from(discovered);
+          setAvailableColumns((prev) => Array.from(new Set([...prev, ...newCols])));
+          setFieldValuesMap((prev) => {
+            const merged = { ...prev };
+            Object.entries(nextValMap).forEach(([k, vals]) => {
+              merged[k] = Array.from(new Set([...(merged[k] || []), ...vals]));
+            });
+            return merged;
+          });
+          setScanMessage(`Discovered ${discovered.size} column(s) from page`);
+        } else {
+          setScanMessage('Scan complete; using recorded workflow columns');
+        }
+      } else {
+        setScanMessage('Desktop bridge idle; using recorded workflow columns');
+      }
+    } catch {
+      setScanMessage('Bridge unavailable; using recorded workflow columns');
+    } finally {
+      setScanningColumns(false);
+      setTimeout(() => setScanMessage(null), 3500);
+    }
+  };
+
+  // Step range validation
+  let loopValidationError: string | null = null;
+  if (execMode === 'loop' && steps.length > 0) {
+    if (isTwoLevel) {
+      if (outerStartIndex > outerEndIndex) {
+        loopValidationError = `Company start step (#${outerStartIndex + 1}) cannot be after company return step (#${outerEndIndex + 1}).`;
+      } else if (outerAnchorIndex < outerStartIndex || outerAnchorIndex > outerEndIndex) {
+        loopValidationError = `Company anchor step (#${outerAnchorIndex + 1}) must be inside company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
+      } else if (innerStartIndex < outerStartIndex || innerEndIndex > outerEndIndex) {
+        loopValidationError = `Record loop range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}] must be enclosed within company range [Step #${outerStartIndex + 1}..#${outerEndIndex + 1}].`;
+      } else if (innerStartIndex > innerEndIndex) {
+        loopValidationError = `Record start step (#${innerStartIndex + 1}) cannot be after record end step (#${innerEndIndex + 1}).`;
+      } else if (innerAnchorIndex < innerStartIndex || innerAnchorIndex > innerEndIndex) {
+        loopValidationError = `Record anchor step (#${innerAnchorIndex + 1}) must be inside record range [Step #${innerStartIndex + 1}..#${innerEndIndex + 1}].`;
+      }
+    } else {
+      if (startStepIndex > endStepIndex) {
+        loopValidationError = `Start step (#${startStepIndex + 1}) cannot be after end step (#${endStepIndex + 1}).`;
+      } else if (anchorStepIndex < startStepIndex || anchorStepIndex > endStepIndex) {
+        loopValidationError = `Collection anchor step (#${anchorStepIndex + 1}) must be inside the loop range [Step #${startStepIndex + 1}..#${endStepIndex + 1}].`;
+      }
+    }
+  }
+
   // Dispatch execution preserving exact backend schema
   const handleDispatchExecution = async () => {
     if (!workflow) return;
+    if (execMode === 'loop' && loopValidationError) {
+      setError(loopValidationError);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -528,12 +645,12 @@ export function ExecutionPreflightModal({
       const itemsLimit = maxItems.trim() ? parseInt(maxItems, 10) : 0;
 
       let constructedFilter: Record<string, unknown> | null = null;
-      if (execMode === 'loop' && recordScope === 'custom') {
+      if (execMode === 'loop' && filterEnabled) {
         const validConditions = filterConditions.map((c) => ({
           field: c.field === '__custom__' ? c.customField.trim() : c.field.trim(),
           operator: c.operator,
           value: c.operator === 'dateBetween' ? { from: c.dateFrom, to: c.dateTo } : c.value.trim()
-        })).filter((c) => c.field && (typeof c.value === 'object' ? c.value.from : c.value));
+        })).filter((c) => c.field && (typeof c.value === 'object' ? (c.value as any).from : c.value));
 
         if (validConditions.length > 0) {
           constructedFilter = {
@@ -622,43 +739,45 @@ export function ExecutionPreflightModal({
 
   if (!isOpen || !workflow) return null;
 
-  // Mascot dynamic messages and icons per step
+  const domain = formatDomain(workflow.portal_url);
+
+  // Companion Robot dynamic info per step
   const mascotInfo = {
     1: {
       image: REFLOW_MASCOT_URL,
-      title: 'How should we run this?',
-      speech: 'Hi! How would you like me to run this workflow? Pick Run Once for a quick single test, or Repeat Tasks to automatically handle batches of invoices, customers, or items!',
-      status: 'Logic Mode: Workflow Ingestion',
-      badge: 'Active & Ready'
+      title: 'Choose Execution Strategy',
+      speech: 'Hi! How would you like me to run this workflow? Choose Standard Run for a single 1x execution, or Loop / Batch to repeat across rows or multiple companies!',
+      status: 'Step 1 of 4 · Execution Strategy',
+      badge: 'Assistant Online'
     },
     2: {
       image: REFLOW_MASCOT_INSPECTING_URL,
-      title: 'Collection & Action Selection',
-      speech: 'Great! I scanned your target webpage and found repeating data records. Choose which collection you want me to process, and what action to perform on each.',
-      status: 'DOM Recognition: Tables & Rows',
-      badge: 'Inspecting Data'
+      title: 'Review Repeating Steps & Anchor',
+      speech: 'Here are your exact recorded steps! I auto-detected the collection anchor and loop range below. Check which steps should repeat for every item.',
+      status: 'Step 2 of 4 · Step Sequence & Anchors',
+      badge: 'Inspecting Steps'
     },
     3: {
       image: REFLOW_MASCOT_URL,
-      title: 'Define Data Target Scope',
-      speech: 'Almost ready! Tell me which specific records to run. You can process everything, or set a simple filter so we only touch what you need.',
-      status: 'Listening & Tuning Filters',
-      badge: 'Target Scope'
+      title: 'Target Records & Filters',
+      speech: 'Tell me which records you need! You can process all records, only new records (NEW_ONLY), or filter by clicking discovered column and option pills!',
+      status: 'Step 3 of 4 · Filters & Scope',
+      badge: 'Listening'
     },
     4: {
       image: REFLOW_MASCOT_URL,
       title: 'Ready for Dispatch',
-      speech: 'All set! Review your automation plan below. If you need special settings like multi-company loops or step ranges, check Advanced Settings, then click Dispatch Execution!',
-      status: 'Ready for Dispatch',
-      badge: 'System Ready'
+      speech: 'Everything is verified and ready to run! Review the final summary below, then click Dispatch Execution to launch.',
+      status: 'Step 4 of 4 · Review & Launch',
+      badge: 'Ready to Dispatch'
     }
   }[currentStep];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xl animate-in fade-in duration-200">
-      <div className="relative mx-auto flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-cyan-500/20 bg-[#0c1427]/98 shadow-[0_24px_64px_rgba(0,0,0,0.85)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-xl animate-in fade-in duration-200">
+      <div className="relative mx-auto flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-cyan-500/25 bg-[#0c1427]/98 shadow-[0_24px_64px_rgba(0,0,0,0.85)]">
         
-        {/* TOP MODAL HEADER & 4-STAGE PROGRESS BAR */}
+        {/* TOP MODAL HEADER & 4-STAGE INTERACTIVE STEPPER */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-cyan-500/15 bg-[#101b33]/90 px-6 py-4 backdrop-blur-md">
           <div className="flex items-center gap-3">
             <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 text-black shadow-md">
@@ -667,122 +786,119 @@ export function ExecutionPreflightModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-white">ReFlow Assistant</span>
-                <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
-                  Interactive Setup
-                </span>
+                <span className="text-sm font-bold text-white tracking-tight">{workflow.name}</span>
+                {domain && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+                    <Globe className="h-3 w-3 text-cyan-400" />
+                    {domain}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-slate-400">Let's set up your automation together!</p>
+              <p className="text-xs text-slate-400">Execution Preflight & Dispatch Mission Control</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-5">
-            {/* 4-Stage Segmented Progress Bar */}
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <span>Step</span>
-                <span className="font-bold text-cyan-400">{currentStep}</span>
-                <span>of 4</span>
-              </div>
-              <div className="grid w-36 grid-cols-4 gap-1.5 h-2">
-                {[1, 2, 3, 4].map((stepNum) => (
-                  <div
-                    key={stepNum}
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      stepNum <= currentStep
-                        ? 'bg-gradient-to-r from-cyan-400 to-blue-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]'
-                        : 'bg-slate-800'
-                    }`}
-                  />
-                ))}
-              </div>
+          <div className="flex items-center gap-4">
+            {/* Interactive Step Buttons */}
+            <div className="hidden sm:flex items-center gap-1 bg-slate-900/80 p-1 rounded-2xl border border-slate-800">
+              {[
+                { step: 1 as const, label: 'Mode' },
+                { step: 2 as const, label: 'Loop Steps' },
+                { step: 3 as const, label: 'Filters' },
+                { step: 4 as const, label: 'Dispatch' }
+              ].map(({ step, label }) => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => setCurrentStep(step)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    currentStep === step
+                      ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                      : step < currentStep
+                      ? 'text-cyan-300 hover:bg-slate-800'
+                      : 'text-slate-400 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
+                    currentStep === step ? 'bg-black text-cyan-400' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {step < currentStep ? '✓' : step}
+                  </span>
+                  <span>{label}</span>
+                </button>
+              ))}
             </div>
 
             <button
               type="button"
               onClick={onClose}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
-              aria-label="Close assistant"
+              className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800/80 transition cursor-pointer"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        {/* ERROR NOTIFICATION BANNER */}
-        {error && (
-          <div className="mx-6 mt-4 flex items-center gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
-            <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-400" />
-            <span className="flex-1 font-medium">{error}</span>
-            <button type="button" onClick={() => setError(null)} className="text-slate-400 hover:text-white">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* MAIN BODY: 2-COLUMN SPLIT (Left 35% Mascot Assistant | Right 65% Interactive Decision Cards) */}
-        <div className="grid flex-1 grid-cols-1 overflow-y-auto p-6 gap-6 lg:grid-cols-12">
+        {/* MODAL MAIN BODY: Mascot Left Column + Step Content Right Column */}
+        <div className="grid flex-1 grid-cols-1 overflow-y-auto p-5 sm:p-6 lg:grid-cols-12 gap-6 max-h-[76vh]">
           
-          {/* LEFT COLUMN: 3D Companion Mascot & Speech Bubble */}
-          <div className="flex flex-col items-center justify-start lg:col-span-4">
-            <div className="relative w-full rounded-2xl border border-cyan-500/15 bg-[#111a31]/80 p-5 shadow-xl backdrop-blur-md">
-              {/* Character 3D Portrait */}
-              <div className="relative mx-auto flex h-44 w-44 items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-xl animate-pulse" />
-                <div className="relative h-40 w-40 overflow-hidden rounded-full bg-[#1b2642] p-1.5 shadow-2xl border border-cyan-500/30">
-                  <img
-                    src={mascotInfo.image}
-                    alt="ReFlow AI Robot Mascot"
-                    className="h-full w-full object-contain transition-transform duration-500 hover:scale-105"
-                  />
-                </div>
-                <div className="absolute -bottom-1 -right-1 flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-black shadow-lg">
-                  <Sparkles className="h-4 w-4" />
-                </div>
+          {/* LEFT COLUMN: Companion Mascot & Conversational Speech Bubble */}
+          <div className="flex flex-col items-center justify-start lg:col-span-4 space-y-4">
+            <div className="relative group w-full flex flex-col items-center rounded-3xl border border-cyan-500/20 bg-gradient-to-b from-[#13203c]/90 to-[#0e172a]/90 p-5 shadow-xl backdrop-blur-xl">
+              
+              {/* Mascot 3D Portrait */}
+              <div className="relative flex items-center justify-center mb-3">
+                <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-xl group-hover:bg-cyan-500/30 transition-all" />
+                <img
+                  src={mascotInfo.image}
+                  alt="ReFlow Assistant Companion"
+                  className="relative h-32 w-32 object-contain drop-shadow-[0_12px_24px_rgba(6,182,212,0.3)] transition-transform duration-300 hover:scale-105"
+                />
               </div>
 
-              {/* Conversational Speech Bubble */}
-              <div className="relative mt-4 rounded-2xl border border-cyan-500/20 bg-[#16223e] p-4 shadow-md">
-                <p className="text-xs leading-relaxed text-slate-200">
+              {/* Speech Bubble */}
+              <div className="relative w-full rounded-2xl border border-cyan-500/25 bg-[#0a1020]/90 p-3.5 shadow-md">
+                <div className="text-xs font-bold text-cyan-300 mb-1 flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>{mascotInfo.title}</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
                   {mascotInfo.speech}
                 </p>
-                <div className="mt-3 flex items-center justify-between border-t border-slate-700/60 pt-2 text-[10px] text-slate-400">
-                  <span>AI Voice Tone</span>
-                  <span className="flex items-center gap-1 font-semibold text-cyan-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                    {mascotInfo.badge}
-                  </span>
-                </div>
               </div>
 
-              {/* Mascot Status Pill */}
-              <div className="mt-3 flex items-center justify-center gap-1.5 rounded-full bg-slate-900/60 px-3 py-1 text-[11px] text-slate-400">
-                <Cpu className="h-3.5 w-3.5 text-cyan-400" />
-                <span>{mascotInfo.status}</span>
+              {/* Status Pill */}
+              <div className="mt-4 flex w-full items-center justify-between px-2 text-[11px] text-slate-400 border-t border-slate-800 pt-3">
+                <span>Assistant Status</span>
+                <span className="flex items-center gap-1 font-semibold text-cyan-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                  {mascotInfo.badge}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Interactive Decision Workspace */}
+          {/* RIGHT COLUMN: Interactive Configuration Workspace */}
           <div className="flex flex-col justify-between lg:col-span-8 space-y-6">
-            
-            {/* STEP 1: EXECUTION MODE (Run Once vs Repeat Tasks) */}
+
+            {/* STEP 1: EXECUTION STRATEGY & TWO-LEVEL TOGGLE */}
             {currentStep === 1 && (
               <div className="space-y-4 animate-in fade-in duration-150">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                    Configuration Choice
+                    Step 1 · Execution Strategy
                   </span>
                   <h2 className="text-xl font-bold text-white sm:text-2xl">
                     What would you like me to do?
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     Choose how ReFlow should execute this recorded workflow.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2">
-                  {/* Option 1: Run Once */}
+                {/* Strategy Cards */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-1">
+                  {/* Option 1: Standard Run */}
                   <div
                     onClick={() => setExecMode('standard')}
                     className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl p-5 transition-all duration-200 ${
@@ -805,10 +921,10 @@ export function ExecutionPreflightModal({
                     </div>
                     <div className="mt-4">
                       <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors">
-                        Run Once
+                        Standard Run
                       </h3>
                       <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        Complete the workflow one single time. Ideal for spot-checking, manual verification, or single data points.
+                        Replay recorded workflow once from start to finish. Ideal for spot-checking, manual verification, or single tests.
                       </p>
                     </div>
                     <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-cyan-400">
@@ -817,7 +933,7 @@ export function ExecutionPreflightModal({
                     </div>
                   </div>
 
-                  {/* Option 2: Repeat Tasks */}
+                  {/* Option 2: Loop / Batch */}
                   <div
                     onClick={() => setExecMode('loop')}
                     className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl p-5 transition-all duration-200 ${
@@ -840,10 +956,10 @@ export function ExecutionPreflightModal({
                     </div>
                     <div className="mt-4">
                       <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors">
-                        Repeat Tasks
+                        Loop / Batch
                       </h3>
                       <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        Process multiple records automatically. Loops sequentially through invoices, tables, contacts, or spreadsheet rows.
+                        Iterate across repeating table rows, invoices, or records and download files automatically.
                       </p>
                     </div>
                     <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-cyan-400">
@@ -853,266 +969,404 @@ export function ExecutionPreflightModal({
                   </div>
                 </div>
 
-                {/* Pro Tip Banner */}
-                <div className="mt-4 flex items-center gap-3 rounded-2xl border border-cyan-500/20 bg-[#101c36] p-4 text-xs">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
-                    <Sparkles className="h-4 w-4" />
+                {/* If Loop mode: Two-Level Iteration toggle & callout banner */}
+                {execMode === 'loop' && (
+                  <div className="space-y-3 pt-2">
+                    {/* Controlled Two-Level Iteration Switch Card */}
+                    <div className="flex items-center justify-between p-4 rounded-2xl border border-cyan-500/25 bg-[#101c36] shadow-sm">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>Two-Level Iteration (Company → Records)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 uppercase">
+                            Controlled
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          Outer loop selects companies; inner loop processes all invoices/records per company.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsTwoLevel(!isTwoLevel)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          isTwoLevel ? 'bg-cyan-500' : 'bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                            isTwoLevel ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Auto-detected Dropdown & Table records callout */}
+                    {twoLevelInfo.hasTwoLevel && (
+                      <div className="p-4 bg-cyan-950/40 border border-cyan-500/30 rounded-2xl text-xs space-y-1.5">
+                        <div className="font-bold text-cyan-300 flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-cyan-400" />
+                          <span>Filter Dropdown & Table Records Detected</span>
+                        </div>
+                        <p className="text-slate-300 text-xs leading-relaxed">
+                          This portal has a filter option (Step #{twoLevelInfo.dropdownStepIndex + 1}) and data table records (Step #{twoLevelInfo.tableStepIndex + 1}).
+                          In <strong>Single-Loop</strong> mode, ReFlow iterates over the table records.
+                          If you want to cycle through each customer in the dropdown and download their records, toggle on <strong>Controlled Two-Level Iteration</strong> above.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    <strong className="text-cyan-300">Pro Tip:</strong> Choose <em>Repeat Tasks</em> if you want to download multiple invoices, process tables of leads, or automate large queues in one click.
-                  </p>
-                </div>
+                )}
               </div>
             )}
 
-            {/* STEP 2: WHAT TO REPEAT & ACTION SEQUENCE */}
+            {/* STEP 2: LOOP STEPS & RANGE ("WHAT TO LOOP ON") */}
             {currentStep === 2 && (
               <div className="space-y-5 animate-in fade-in duration-150">
-                {/* Question 1: What would you like me to repeat? */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                        Step 2 · Item Selection
-                      </span>
-                      <h2 className="text-lg font-bold text-white sm:text-xl">
-                        What would you like me to repeat?
-                      </h2>
-                    </div>
-                    <span className="text-xs text-slate-400">3 patterns found</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {/* Collection 1: Invoice Records */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCollection('primary_table')}
-                      className={`group relative rounded-2xl p-4 text-left transition-all ${
-                        selectedCollection === 'primary_table'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
-                          <TableIcon className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          selectedCollection === 'primary_table' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Invoice Records</div>
-                      <span className="text-[10px] font-semibold text-cyan-300">Recommended</span>
-                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
-                        Extracted table dataset matching rows #inv-2024
-                      </p>
-                      <div className="mt-3 flex items-center justify-between text-[10px]">
-                        <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-cyan-300 font-semibold">
-                          48 items
-                        </span>
-                        <span className="text-slate-400 font-mono">100% match</span>
-                      </div>
-                    </button>
-
-                    {/* Collection 2: Customer Contact List */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCollection('customer_list')}
-                      className={`group relative rounded-2xl p-4 text-left transition-all ${
-                        selectedCollection === 'customer_list'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400">
-                          <Layers className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          selectedCollection === 'customer_list' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Customer List</div>
-                      <span className="text-[10px] font-semibold text-slate-400">Secondary Element</span>
-                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
-                        Customer dropdown accounts embedded within selector
-                      </p>
-                      <div className="mt-3 flex items-center justify-between text-[10px]">
-                        <span className="rounded-full bg-purple-500/20 px-2 py-0.5 text-purple-300 font-semibold">
-                          12 items
-                        </span>
-                        <span className="text-slate-400 font-mono">Dropdown</span>
-                      </div>
-                    </button>
-
-                    {/* Collection 3: Product Inventory Rows */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCollection('inventory_rows')}
-                      className={`group relative rounded-2xl p-4 text-left transition-all ${
-                        selectedCollection === 'inventory_rows'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.4)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400">
-                          <Layers3 className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          selectedCollection === 'inventory_rows' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="font-bold text-xs text-white group-hover:text-cyan-300">Inventory Rows</div>
-                      <span className="text-[10px] font-semibold text-slate-400">Catalog View</span>
-                      <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
-                        Nested SKU table with price and stock status
-                      </p>
-                      <div className="mt-3 flex items-center justify-between text-[10px]">
-                        <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-blue-300 font-semibold">
-                          120 items
-                        </span>
-                        <span className="text-slate-400 font-mono">Paginated</span>
-                      </div>
-                    </button>
-                  </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Step 2 · Step Selection & Loop Range
+                  </span>
+                  <h2 className="text-xl font-bold text-white sm:text-2xl">
+                    Which steps should repeat?
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {execMode === 'standard'
+                      ? 'Standard Run will execute all recorded steps once from start to finish.'
+                      : 'Choose the collection anchor that identifies rows, and define the start and end steps for the loop.'}
+                  </p>
                 </div>
 
-                {/* Question 2: What should I do with each item? */}
-                <div className="space-y-3 pt-2">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                      Step 2 · Action Sequence
-                    </span>
-                    <h2 className="text-lg font-bold text-white sm:text-xl">
-                      What should I do with each item?
-                    </h2>
+                {execMode === 'loop' && (
+                  <div className="space-y-4">
+                    {/* TWO-LEVEL ITERATION STEPS */}
+                    {isTwoLevel ? (
+                      <div className="space-y-3">
+                        {/* Company Outer Loop */}
+                        <div className="space-y-3 p-4 rounded-2xl border border-cyan-500/30 bg-[#101c36]/90">
+                          <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                                Level 1: Company Collection (Outer Loop)
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono font-semibold text-cyan-300">
+                              Company Anchor: Step #{outerAnchorIndex + 1}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-300">
+                              Company Anchor Step (Selects Company in Portal)
+                            </label>
+                            <select
+                              value={outerAnchorIndex}
+                              onChange={(e) => {
+                                const idx = parseInt(e.target.value, 10);
+                                setOuterAnchorIndex(idx);
+                                if (idx < outerStartIndex) setOuterStartIndex(idx);
+                              }}
+                              className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                            >
+                              {steps.map((step: any, idx: number) => (
+                                <option key={idx} value={idx}>
+                                  {formatStepLabel(step, idx)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 pt-1">
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                Outer Start Step
+                              </label>
+                              <select
+                                value={outerStartIndex}
+                                onChange={(e) => setOuterStartIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                Return Step to Company View (Outer End)
+                              </label>
+                              <select
+                                value={outerEndIndex}
+                                onChange={(e) => setOuterEndIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Record Inner Loop */}
+                        <div className="space-y-3 p-4 rounded-2xl border border-emerald-500/30 bg-[#0d222a]/90">
+                          <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                                Level 2: Record Collection (Inner Invoices)
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono font-semibold text-emerald-300">
+                              Record Anchor: Step #{innerAnchorIndex + 1}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-300">
+                              Record Anchor Step (Identifies Rows to Iterate)
+                            </label>
+                            <select
+                              value={innerAnchorIndex}
+                              onChange={(e) => {
+                                const idx = parseInt(e.target.value, 10);
+                                setInnerAnchorIndex(idx);
+                                if (idx < innerStartIndex) setInnerStartIndex(idx);
+                              }}
+                              className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                            >
+                              {steps.map((step: any, idx: number) => (
+                                <option key={idx} value={idx}>
+                                  {formatStepLabel(step, idx)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 pt-1">
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                Inner Start Step
+                              </label>
+                              <select
+                                value={innerStartIndex}
+                                onChange={(e) => setInnerStartIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                Inner End Step
+                              </label>
+                              <select
+                                value={innerEndIndex}
+                                onChange={(e) => setInnerEndIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* SINGLE COLLECTION LOOP */
+                      <div className="space-y-4">
+                        {/* Collection Anchor Dropdown */}
+                        <div className="space-y-1.5 p-4 rounded-2xl border border-cyan-500/25 bg-[#101c36]">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-bold text-white">
+                              Collection Anchor Step (Identifies Rows / Items)
+                            </label>
+                            <span className="text-xs font-mono font-semibold text-cyan-300">
+                              Step #{anchorStepIndex + 1}
+                            </span>
+                          </div>
+                          <select
+                            value={anchorStepIndex}
+                            onChange={(e) => {
+                              const idx = parseInt(e.target.value, 10);
+                              setAnchorStepIndex(idx);
+                              if (idx < startStepIndex) setStartStepIndex(idx);
+                              if (idx > endStepIndex) setEndStepIndex(idx);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                          >
+                            {steps.map((step: any, idx: number) => {
+                              const isDetected = idx === detectLoopCandidate(steps);
+                              return (
+                                <option key={idx} value={idx}>
+                                  {formatStepLabel(step, idx)} {isDetected ? '(Auto-detected Collection Anchor)' : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Identifies the collection (table, list, cards) to iterate over.
+                          </p>
+                        </div>
+
+                        {/* Loop Range: Start & End */}
+                        <div className="space-y-3 p-4 rounded-2xl border border-slate-800 bg-[#0e172a]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white">
+                              Loop Range (Steps Repeated per Item)
+                            </span>
+                            <span className="text-xs font-mono text-cyan-400">
+                              Steps #{startStepIndex + 1}..#{endStepIndex + 1} ({Math.max(1, endStepIndex - startStepIndex + 1)} steps)
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                Start Step (Inclusive)
+                              </label>
+                              <select
+                                value={startStepIndex}
+                                onChange={(e) => setStartStepIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">
+                                End Step (Inclusive)
+                              </label>
+                              <select
+                                value={endStepIndex}
+                                onChange={(e) => setEndStepIndex(parseInt(e.target.value, 10))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                              >
+                                {steps.map((step: any, idx: number) => (
+                                  <option key={idx} value={idx}>
+                                    #{idx + 1}: {formatStepLabel(step, idx)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* 3 Summary Breakdown Cards */}
+                          <div className="grid grid-cols-3 gap-2 pt-2 text-center text-xs">
+                            <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60">
+                              <span className="text-[10px] text-slate-400 block font-medium">Setup (Once)</span>
+                              <span className="font-semibold text-slate-200 mt-0.5 block">
+                                {startStepIndex > 0 ? `Steps 1..${startStepIndex}` : 'None'}
+                              </span>
+                            </div>
+                            <div className="p-2.5 rounded-xl border border-cyan-500/30 bg-cyan-950/20">
+                              <span className="text-[10px] text-cyan-400 block font-medium">Loop (Per Item)</span>
+                              <span className="font-bold text-cyan-300 mt-0.5 block">
+                                Steps {startStepIndex + 1}..{endStepIndex + 1}
+                              </span>
+                            </div>
+                            <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60">
+                              <span className="text-[10px] text-slate-400 block font-medium">Teardown (Once)</span>
+                              <span className="font-semibold text-slate-200 mt-0.5 block">
+                                {endStepIndex < steps.length - 1 ? `Steps ${endStepIndex + 2}..${steps.length}` : 'None'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                )}
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <button
-                      type="button"
-                      onClick={() => setTargetAction('download')}
-                      className={`group rounded-2xl p-4 text-left transition-all ${
-                        targetAction === 'download'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
-                          <Download className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          targetAction === 'download' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="text-xs font-bold text-white">Download Each Item</div>
-                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-                        Saves PDF/CSV attachments directly to local storage or cloud drive.
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setTargetAction('select')}
-                      className={`group rounded-2xl p-4 text-left transition-all ${
-                        targetAction === 'select'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
-                          <CheckSquare className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          targetAction === 'select' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="text-xs font-bold text-white">Select Each Item</div>
-                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-                        Clicks checkboxes to prepare multiple items for bulk batch action.
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setTargetAction('process')}
-                      className={`group rounded-2xl p-4 text-left transition-all ${
-                        targetAction === 'process'
-                          ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_20px_-4px_rgba(6,182,212,0.35)]'
-                          : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
-                          <FileCode className="h-4 w-4" />
-                        </div>
-                        <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                          targetAction === 'process' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                        }`}>
-                          <Check className="h-3 w-3 font-bold" />
-                        </div>
-                      </div>
-                      <div className="text-xs font-bold text-white">Process Each Item</div>
-                      <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-                        Extracts metadata fields and formats payload into clean JSON/Webhook.
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Target Data Stream Preview */}
-                <div className="rounded-2xl border border-cyan-500/15 bg-[#101b33]/80 p-4">
+                {/* VISUAL STEP SEQUENCE TIMELINE */}
+                <div className="space-y-2 p-4 rounded-2xl border border-slate-800 bg-[#0e172a]/90">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <TableIcon className="h-4 w-4 text-cyan-400" />
-                      <span className="text-xs font-bold text-white">Target Data Stream Preview</span>
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
-                        Sample Rows
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-cyan-400 font-mono">Live Preview</span>
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Layers3 className="h-4 w-4 text-cyan-400" />
+                      <span>Recorded Steps Sequence ({steps.length} total)</span>
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Step execution breakdown
+                    </span>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[11px] text-slate-300">
-                      <thead>
-                        <tr className="border-b border-slate-700/60 text-slate-400 text-[10px] uppercase">
-                          <th className="py-1.5 px-2">Item ID</th>
-                          <th className="py-1.5 px-2">Document Type</th>
-                          <th className="py-1.5 px-2">Date</th>
-                          <th className="py-1.5 px-2">Amount</th>
-                          <th className="py-1.5 px-2 text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        <tr>
-                          <td className="py-1.5 px-2 font-mono text-cyan-400">INV-2026-001</td>
-                          <td className="py-1.5 px-2">Invoice</td>
-                          <td className="py-1.5 px-2">Nov 04, 2026</td>
-                          <td className="py-1.5 px-2 font-mono">$4,280.00</td>
-                          <td className="py-1.5 px-2 text-right text-emerald-400 font-semibold">● Ready</td>
-                        </tr>
-                        <tr>
-                          <td className="py-1.5 px-2 font-mono text-cyan-400">INV-2026-002</td>
-                          <td className="py-1.5 px-2">Invoice</td>
-                          <td className="py-1.5 px-2">Nov 05, 2026</td>
-                          <td className="py-1.5 px-2 font-mono">$1,950.50</td>
-                          <td className="py-1.5 px-2 text-right text-emerald-400 font-semibold">● Ready</td>
-                        </tr>
-                      </tbody>
-                    </table>
+
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {steps.map((step: any, idx: number) => {
+                      const isCompany = isTwoLevel && idx === outerAnchorIndex;
+                      const isRecord = (isTwoLevel && idx === innerAnchorIndex) || (!isTwoLevel && idx === anchorStepIndex);
+                      const inLoop = isTwoLevel
+                        ? (idx >= innerStartIndex && idx <= innerEndIndex)
+                        : (idx >= startStepIndex && idx <= endStepIndex);
+                      const isSetup = isTwoLevel ? (idx < outerStartIndex) : (idx < startStepIndex);
+                      const isTeardown = isTwoLevel ? (idx > outerEndIndex) : (idx > endStepIndex);
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center justify-between p-2 rounded-xl border text-xs transition-colors ${
+                            isRecord
+                              ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-200'
+                              : isCompany
+                              ? 'border-cyan-500/50 bg-cyan-950/20 text-cyan-200'
+                              : inLoop
+                              ? 'border-cyan-500/25 bg-cyan-950/10 text-slate-200'
+                              : 'border-slate-800/80 bg-slate-900/40 text-slate-400'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="font-mono font-bold text-[11px] text-slate-400">
+                              #{idx + 1}
+                            </span>
+                            <span className="truncate font-medium">
+                              {step.name || step.elementName || step.target?.friendlyName || step.description || step.type || 'Action'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isCompany && (
+                              <span className="rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 text-[9px] font-bold">
+                                Company Anchor
+                              </span>
+                            )}
+                            {isRecord && (
+                              <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 text-[9px] font-bold">
+                                Record Anchor
+                              </span>
+                            )}
+                            {!isCompany && !isRecord && inLoop && (
+                              <span className="rounded-full bg-cyan-500/10 text-cyan-400 px-2 py-0.5 text-[9px] font-medium">
+                                🔁 Loop
+                              </span>
+                            )}
+                            {isSetup && (
+                              <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px]">
+                                Setup (1x)
+                              </span>
+                            )}
+                            {isTeardown && (
+                              <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px]">
+                                Teardown (1x)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1120,411 +1374,312 @@ export function ExecutionPreflightModal({
 
             {/* STEP 3: SELECT RECORDS & FILTERS */}
             {currentStep === 3 && (
-              <div className="space-y-4 animate-in fade-in duration-150">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                    Data Target Scope
-                  </span>
-                  <h2 className="text-xl font-bold text-white sm:text-2xl">
-                    Which records should I process?
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Choose the scope of data items to extract, iterate through, or execute actions against.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 pt-2">
-                  {/* Option 1: All Records */}
-                  <button
-                    type="button"
-                    onClick={() => setRecordScope('all')}
-                    className={`group rounded-2xl p-4 text-left transition-all ${
-                      recordScope === 'all'
-                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
-                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
-                        <Layers className="h-5 w-5" />
-                      </div>
-                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                        recordScope === 'all' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                      }`}>
-                        <Check className="h-3 w-3 font-bold" />
-                      </div>
-                    </div>
-                    <div className="font-bold text-sm text-white">All Records</div>
-                    <p className="mt-1 text-xs text-slate-400 leading-snug">
-                      Process everything on the page.
-                    </p>
-                    <div className="mt-3 text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                      <TableIcon className="h-3 w-3" />
-                      <span>Entire table set</span>
-                    </div>
-                  </button>
-
-                  {/* Option 2: Only New Records */}
-                  <button
-                    type="button"
-                    onClick={() => setRecordScope('new')}
-                    className={`group rounded-2xl p-4 text-left transition-all ${
-                      recordScope === 'new'
-                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
-                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400">
-                        <Sparkles className="h-5 w-5" />
-                      </div>
-                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                        recordScope === 'new' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                      }`}>
-                        <Check className="h-3 w-3 font-bold" />
-                      </div>
-                    </div>
-                    <div className="font-bold text-sm text-white">Only New</div>
-                    <p className="mt-1 text-xs text-slate-400 leading-snug">
-                      Skip items already processed in earlier runs.
-                    </p>
-                    <div className="mt-3 text-[11px] font-semibold text-cyan-300 flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      <span>Delta synchronization</span>
-                    </div>
-                  </button>
-
-                  {/* Option 3: Custom Filter */}
-                  <button
-                    type="button"
-                    onClick={() => setRecordScope('custom')}
-                    className={`group rounded-2xl p-4 text-left transition-all ${
-                      recordScope === 'custom'
-                        ? 'border-2 border-cyan-400 bg-[#152342] shadow-[0_0_24px_rgba(6,182,212,0.3)]'
-                        : 'border border-slate-800 bg-[#101b33]/60 hover:bg-[#152342]/70'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400">
-                        <Filter className="h-5 w-5" />
-                      </div>
-                      <div className={`flex h-5 w-5 items-center justify-center rounded-full ${
-                        recordScope === 'custom' ? 'bg-cyan-500 text-black' : 'opacity-0'
-                      }`}>
-                        <Check className="h-3 w-3 font-bold" />
-                      </div>
-                    </div>
-                    <div className="font-bold text-sm text-white">Custom Filter</div>
-                    <p className="mt-1 text-xs text-slate-400 leading-snug">
-                      Choose specific items matching your conditions.
-                    </p>
-                    <div className="mt-3 text-[11px] font-semibold text-cyan-400 flex items-center gap-1">
-                      <Sliders className="h-3 w-3" />
-                      <span>Rule-builder active</span>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Progressive Filter Builder Card (When Custom Filter is Active) */}
-                {recordScope === 'custom' && (
-                  <div className="space-y-4 rounded-2xl border border-cyan-500/20 bg-[#101c36] p-5 shadow-xl transition-all">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Filter Conditions</h3>
-                        <p className="text-xs text-slate-400">Records must satisfy these parameter rules</p>
-                      </div>
-
-                      {/* Segmented Match Mode Switch */}
-                      <div className="inline-flex rounded-full border border-slate-800 bg-black/30 p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setMatchMode('all')}
-                          className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                            matchMode === 'all'
-                              ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.5)]'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Match ALL conditions
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setMatchMode('any')}
-                          className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                            matchMode === 'any'
-                              ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.5)]'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Match ANY condition
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Condition Rows */}
-                    <div className="space-y-2.5">
-                      {filterConditions.map((cond, idx) => (
-                        <div
-                          key={cond.id}
-                          className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 rounded-xl border border-slate-800 bg-[#0c1427] p-2.5"
-                        >
-                          <span className="text-[11px] font-bold text-cyan-400 px-1 shrink-0">
-                            {idx === 0 ? 'Where' : matchMode === 'all' ? 'AND' : 'OR'}
-                          </span>
-
-                          {/* Column Select */}
-                          <select
-                            value={cond.field}
-                            onChange={(e) => handleUpdateCondition(cond.id, { field: e.target.value })}
-                            className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
-                          >
-                            {availableColumns.map((col) => (
-                              <option key={col} value={col}>{col}</option>
-                            ))}
-                            <option value="__custom__">+ Custom field</option>
-                          </select>
-
-                          {cond.field === '__custom__' && (
-                            <input
-                              type="text"
-                              value={cond.customField}
-                              onChange={(e) => handleUpdateCondition(cond.id, { customField: e.target.value })}
-                              placeholder="Field name..."
-                              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                            />
-                          )}
-
-                          {/* Operator */}
-                          <select
-                            value={cond.operator}
-                            onChange={(e) => handleUpdateCondition(cond.id, { operator: e.target.value as any })}
-                            className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
-                          >
-                            <option value="contains">contains</option>
-                            <option value="equals">equals</option>
-                            <option value="dateBetween">date between</option>
-                          </select>
-
-                          {/* Value Input */}
-                          {cond.operator === 'dateBetween' ? (
-                            <div className="flex items-center gap-1.5 flex-1">
-                              <input
-                                type="date"
-                                value={cond.dateFrom}
-                                onChange={(e) => handleUpdateCondition(cond.id, { dateFrom: e.target.value })}
-                                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white"
-                              />
-                              <span className="text-slate-500 text-xs">to</span>
-                              <input
-                                type="date"
-                                value={cond.dateTo}
-                                onChange={(e) => handleUpdateCondition(cond.id, { dateTo: e.target.value })}
-                                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white"
-                              />
-                            </div>
-                          ) : (
-                            <input
-                              type="text"
-                              value={cond.value}
-                              onChange={(e) => handleUpdateCondition(cond.id, { value: e.target.value })}
-                              placeholder="Filter value..."
-                              className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                            />
-                          )}
-
-                          {/* Remove button */}
-                          {filterConditions.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveCondition(cond.id)}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={handleAddCondition}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>Add Another Condition</span>
-                      </button>
-
-                      <div className="flex items-center gap-1.5 rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-300">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        <span>Targeting specific records</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* STEP 4: REVIEW & LAUNCH (Summary & Collapsible Advanced Settings) */}
-            {currentStep === 4 && (
               <div className="space-y-5 animate-in fade-in duration-150">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                    Step 4 · Final Verification
+                    Step 3 · Scope & Record Criteria
                   </span>
                   <h2 className="text-xl font-bold text-white sm:text-2xl">
-                    Review & Launch Automation
+                    Which records to process?
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Verify your execution plan below. Everything is configured and ready to run.
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Define limits, deduplication rules, and item filtering conditions.
                   </p>
                 </div>
 
-                {/* Plan Summary Cards */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-cyan-500/20 bg-[#101b33]/80 p-4 space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-slate-400">Execution Strategy</span>
-                    <div className="text-base font-bold text-white flex items-center gap-2">
-                      {execMode === 'standard' ? (
-                        <>
-                          <Play className="h-4 w-4 text-cyan-400 fill-current" />
-                          <span>Run Once (1x Execution)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Repeat className="h-4 w-4 text-cyan-400" />
-                          <span>Repeat Tasks (Batch Processing)</span>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-400">
-                      {execMode === 'standard'
-                        ? 'Executes recorded steps once sequentially'
-                        : `Repeating on "${selectedCollection}" with "${targetAction}" action`}
-                    </p>
+                {/* BATCH ITERATION LIMITS */}
+                <div className="space-y-3 p-4 rounded-2xl border border-slate-800 bg-[#0e172a]">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="h-4 w-4 text-cyan-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Batch Iteration Limits
+                    </span>
                   </div>
 
-                  <div className="rounded-2xl border border-cyan-500/20 bg-[#101b33]/80 p-4 space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-slate-400">Target Data Scope</span>
-                    <div className="text-base font-bold text-white flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-cyan-400" />
-                      <span>
-                        {execMode === 'standard'
-                          ? 'Standard Single Pass'
-                          : recordScope === 'all'
-                          ? 'All Records (Entire Set)'
-                          : recordScope === 'new'
-                          ? 'Only New Records (NEW_ONLY)'
-                          : `Custom Filter (${filterConditions.length} rules)`}
-                      </span>
+                  {/* Max Items Limit Input */}
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-slate-300">
+                      Max Items Limit
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="All items (no limit)"
+                      value={maxItems}
+                      onChange={(e) => setMaxItems(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {/* Process New Records Only (NEW_ONLY) Toggle */}
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-slate-800/80 bg-slate-900/60">
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>Process New Records Only (NEW_ONLY)</span>
+                        <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 text-[9px] font-bold uppercase">
+                          Deduplication
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Skip previously processed records across runs using composite identity (recordId).
+                      </p>
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      {isRunnerOnline ? 'Desktop Worker Online & Connected' : 'Waiting for desktop worker'}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setNewOnly(!newOnly)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        newOnly ? 'bg-cyan-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                          newOnly ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
                   </div>
                 </div>
 
-                {/* COLLAPSIBLE ADVANCED SETTINGS ACCORDION */}
-                <div className="rounded-2xl border border-slate-800 bg-[#0e172a]/90 overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                    className="flex w-full items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Sliders className="h-4 w-4 text-cyan-400" />
-                      <span className="text-xs font-bold text-white">
-                        Advanced Settings & Loop Fine-Tuning
-                      </span>
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                        Optional
+                {/* ITEM FILTER RULES */}
+                <div className="space-y-3 p-4 rounded-2xl border border-cyan-500/25 bg-[#101c36]">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">
+                        Item Filter Rules
                       </span>
                     </div>
-                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`} />
-                  </button>
+                    <span className="text-[11px] text-slate-400">Row criteria filter</span>
+                  </div>
 
-                  {isAdvancedOpen && (
-                    <div className="border-t border-slate-800 p-5 space-y-5 text-xs">
-                      {/* Process Multiple Companies (Two-Level Iteration) */}
-                      <div className="space-y-3 rounded-xl border border-slate-800 bg-[#0c1427] p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-bold text-white">Process Multiple Companies</span>
-                            <p className="text-[11px] text-slate-400">
-                              Controlled two-level iteration across outer companies and inner records.
-                            </p>
-                          </div>
+                  {/* Filter Mode Selector: All Items vs Filter Items */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFilterEnabled(false)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        !filterEnabled
+                          ? 'border border-cyan-400 bg-cyan-500 text-black shadow-md'
+                          : 'border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Process all items (No filter)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterEnabled(true)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        filterEnabled
+                          ? 'border border-cyan-400 bg-cyan-500 text-black shadow-md'
+                          : 'border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Filter items by condition
+                    </button>
+                  </div>
+
+                  {/* Conditions & Column Discovery */}
+                  {filterEnabled && (
+                    <div className="space-y-4 pt-2 border-t border-slate-800">
+                      {/* Match Mode & Rescan Buttons */}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-slate-400 font-medium">Match Mode:</span>
                           <button
                             type="button"
-                            onClick={() => setIsTwoLevel(!isTwoLevel)}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                              isTwoLevel ? 'bg-cyan-500' : 'bg-slate-700'
+                            onClick={() => setMatchMode('all')}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                              matchMode === 'all'
+                                ? 'bg-cyan-500 text-black'
+                                : 'bg-slate-800 text-slate-400 hover:text-white'
                             }`}
                           >
-                            <span
-                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                isTwoLevel ? 'translate-x-5' : 'translate-x-0'
-                              }`}
-                            />
+                            ALL rules (AND)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMatchMode('any')}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                              matchMode === 'any'
+                                ? 'bg-cyan-500 text-black'
+                                : 'bg-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            ANY rule (OR)
                           </button>
                         </div>
 
-                        {isTwoLevel && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-800">
-                            <div>
-                              <label className="text-[11px] text-slate-400">Company Anchor Step</label>
-                              <select
-                                value={outerAnchorIndex}
-                                onChange={(e) => setOuterAnchorIndex(Number(e.target.value))}
-                                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
-                              >
-                                {steps.map((s, idx) => (
-                                  <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="text-[11px] text-slate-400">Invoice Anchor Step</label>
-                              <select
-                                value={innerAnchorIndex}
-                                onChange={(e) => setInnerAnchorIndex(Number(e.target.value))}
-                                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
-                              >
-                                {steps.map((s, idx) => (
-                                  <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        )}
+                        <button
+                          type="button"
+                          onClick={handleRefreshFields}
+                          disabled={scanningColumns}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-cyan-400 text-xs font-medium hover:bg-slate-700 transition cursor-pointer"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${scanningColumns ? 'animate-spin' : ''}`} />
+                          <span>{scanningColumns ? 'Scanning...' : 'Re-scan Columns'}</span>
+                        </button>
                       </div>
 
-                      {/* Batch Iteration Limits */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[11px] text-slate-400">Max Items Limit (How many items)</label>
-                          <input
-                            type="number"
-                            value={maxItems}
-                            onChange={(e) => setMaxItems(e.target.value)}
-                            placeholder="e.g. 50 (or leave empty for all)"
-                            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white placeholder-slate-500"
-                          />
+                      {scanMessage && (
+                        <p className="text-[11px] text-cyan-300 italic">{scanMessage}</p>
+                      )}
+
+                      {/* QUICK PICK: DISCOVERED COLUMNS PILLS */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                            <Tag className="h-3 w-3 text-cyan-400" />
+                            <span>Quick Pick: Discovered Columns</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {availableColumns.length} detected
+                          </span>
                         </div>
 
-                        <div>
-                          <label className="text-[11px] text-slate-400">Collection Anchor Step</label>
-                          <select
-                            value={anchorStepIndex}
-                            onChange={(e) => setAnchorStepIndex(Number(e.target.value))}
-                            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-white"
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableColumns.map((col) => (
+                            <button
+                              key={col}
+                              type="button"
+                              onClick={() => handleSelectColumnPill(col)}
+                              className={`px-2.5 py-1 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                                activeField.toLowerCase() === col.toLowerCase()
+                                  ? 'bg-cyan-500 text-black font-bold shadow-[0_0_10px_rgba(6,182,212,0.4)]'
+                                  : 'bg-slate-900 border border-slate-800 text-slate-300 hover:border-slate-700'
+                              }`}
+                            >
+                              {col}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => handleSelectColumnPill('__custom__')}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                              activeField === '__custom__'
+                                ? 'bg-cyan-500 text-black font-bold'
+                                : 'bg-slate-900/60 border border-dashed border-slate-700 text-slate-400 hover:text-white'
+                            }`}
                           >
-                            {steps.map((s, idx) => (
-                              <option key={idx} value={idx}>{formatStepLabel(s, idx)}</option>
-                            ))}
-                          </select>
+                            Custom...
+                          </button>
                         </div>
+                      </div>
+
+                      {/* DETECTED OPTIONS FOR ACTIVE FIELD */}
+                      {getValuesForField(activeField).length > 0 && (
+                        <div className="space-y-1.5 p-3 rounded-xl border border-slate-800/80 bg-slate-900/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-slate-300">
+                              Detected Options for &ldquo;{activeField}&rdquo;:
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {getValuesForField(activeField).length} option(s)
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                            {getValuesForField(activeField).map((optVal) => (
+                              <button
+                                key={optVal}
+                                type="button"
+                                onClick={() => handleSelectValuePill(optVal)}
+                                className="px-2.5 py-0.5 rounded-lg text-[11px] bg-slate-800 border border-slate-700 text-cyan-300 hover:bg-cyan-500 hover:text-black transition-colors cursor-pointer"
+                              >
+                                {optVal}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* DYNAMIC FILTER CONDITION BUILDER */}
+                      <div className="space-y-2 pt-1">
+                        <label className="block text-[11px] font-bold text-slate-300">
+                          Active Filter Rules
+                        </label>
+                        {filterConditions.map((cond, cIdx) => (
+                          <div key={cond.id} className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl border border-slate-800 bg-slate-900/70">
+                            {/* Column Select */}
+                            <select
+                              value={cond.field}
+                              onChange={(e) => handleUpdateCondition(cond.id, { field: e.target.value })}
+                              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer min-w-[120px]"
+                            >
+                              {availableColumns.map((col) => (
+                                <option key={col} value={col}>{col}</option>
+                              ))}
+                              <option value="__custom__">Custom field...</option>
+                            </select>
+
+                            {cond.field === '__custom__' && (
+                              <input
+                                type="text"
+                                placeholder="Column name..."
+                                value={cond.customField}
+                                onChange={(e) => handleUpdateCondition(cond.id, { customField: e.target.value })}
+                                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-32"
+                              />
+                            )}
+
+                            {/* Operator Select */}
+                            <select
+                              value={cond.operator}
+                              onChange={(e) => handleUpdateCondition(cond.id, { operator: e.target.value as any })}
+                              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer min-w-[100px]"
+                            >
+                              <option value="contains">contains</option>
+                              <option value="equals">equals</option>
+                              <option value="dateBetween">date between</option>
+                            </select>
+
+                            {/* Value Input */}
+                            {cond.operator === 'dateBetween' ? (
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="date"
+                                  value={cond.dateFrom}
+                                  onChange={(e) => handleUpdateCondition(cond.id, { dateFrom: e.target.value })}
+                                  className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-cyan-500"
+                                />
+                                <span className="text-slate-500 text-xs">to</span>
+                                <input
+                                  type="date"
+                                  value={cond.dateTo}
+                                  onChange={(e) => handleUpdateCondition(cond.id, { dateTo: e.target.value })}
+                                  className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-cyan-500"
+                                />
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="Filter value..."
+                                value={cond.value}
+                                onChange={(e) => handleUpdateCondition(cond.id, { value: e.target.value })}
+                                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 min-w-[130px]"
+                              />
+                            )}
+
+                            {/* Remove Condition */}
+                            {filterConditions.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCondition(cond.id)}
+                                className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+
+                        <button
+                          type="button"
+                          onClick={handleAddCondition}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition cursor-pointer pt-1"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>Add Filter Rule</span>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -1532,35 +1687,170 @@ export function ExecutionPreflightModal({
               </div>
             )}
 
-            {/* BOTTOM WIZARD CONTROLS */}
-            <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
-              <button
-                type="button"
-                onClick={() => setCurrentStep((prev) => (prev > 1 ? (prev - 1) as any : 1))}
-                disabled={currentStep === 1 || submitting}
-                className={`inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold transition-all ${
-                  currentStep === 1
-                    ? 'opacity-40 cursor-not-allowed text-slate-600'
-                    : 'border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white'
-                }`}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                <span>Back</span>
-              </button>
+            {/* STEP 4: REVIEW & DISPATCH */}
+            {currentStep === 4 && (
+              <div className="space-y-5 animate-in fade-in duration-150">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                    Step 4 · Confirmation & Dispatch
+                  </span>
+                  <h2 className="text-xl font-bold text-white sm:text-2xl">
+                    Review execution plan
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Verify all execution settings before launching to your desktop worker.
+                  </p>
+                </div>
+
+                {/* Strategy Summary Bento Card */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl border border-cyan-500/25 bg-[#0e172a]">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Execution Mode
+                    </span>
+                    <p className="text-sm font-bold text-white flex items-center gap-1.5">
+                      {execMode === 'standard' ? (
+                        <>
+                          <Play className="h-4 w-4 text-cyan-400" />
+                          <span>Standard Run (1x)</span>
+                        </>
+                      ) : isTwoLevel ? (
+                        <>
+                          <Repeat className="h-4 w-4 text-cyan-400" />
+                          <span>Controlled Two-Level Iteration</span>
+                        </>
+                      ) : (
+                        <>
+                          <Repeat className="h-4 w-4 text-cyan-400" />
+                          <span>Loop / Batch Mode</span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Target Portal
+                    </span>
+                    <p className="text-xs font-semibold text-cyan-300 truncate">
+                      {workflow.portal_url || 'Active browser tab'}
+                    </p>
+                  </div>
+
+                  {execMode === 'loop' && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Repeating Step Range
+                        </span>
+                        <p className="text-xs font-mono font-bold text-slate-200">
+                          {isTwoLevel
+                            ? `Outer: #${outerStartIndex + 1}..#${outerEndIndex + 1} | Inner: #${innerStartIndex + 1}..#${innerEndIndex + 1}`
+                            : `Steps #${startStepIndex + 1}..#${endStepIndex + 1} (${endStepIndex - startStepIndex + 1} repeated steps)`}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Collection Anchor
+                        </span>
+                        <p className="text-xs font-semibold text-slate-200 truncate">
+                          {isTwoLevel
+                            ? `Company #${outerAnchorIndex + 1} • Record #${innerAnchorIndex + 1}`
+                            : `Step #${anchorStepIndex + 1}: ${formatStepLabel(steps[anchorStepIndex], anchorStepIndex)}`}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Deduplication
+                        </span>
+                        <p className="text-xs font-semibold text-slate-200">
+                          {newOnly ? 'Only Process New Records (NEW_ONLY)' : 'All Records (Allow repeats)'}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Filter Criteria
+                        </span>
+                        <p className="text-xs font-semibold text-slate-200">
+                          {filterEnabled && filterConditions.length > 0
+                            ? `${filterConditions.length} rule(s) (${matchMode.toUpperCase()})`
+                            : 'No filter (process all items)'}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Worker Readiness Status Card */}
+                <div className={`flex items-start gap-3 p-4 rounded-2xl border text-xs ${
+                  isRunnerOnline
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                }`}>
+                  {isRunnerOnline ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <Cpu className="h-4 w-4" />
+                      <span>{isRunnerOnline ? 'Desktop Worker Online & Connected' : 'Desktop Worker Offline'}</span>
+                    </div>
+                    <p className="text-slate-400 mt-0.5 text-xs">
+                      {isRunnerOnline
+                        ? 'CDP browser automation is ready. Execution will begin immediately upon dispatch.'
+                        : 'Worker is currently disconnected. Run will queue in pending state until worker reconnects.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Validation Error Alert */}
+                {loopValidationError && (
+                  <div className="flex items-center gap-2 p-3.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-xs text-rose-300 font-semibold">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                    <span>{loopValidationError}</span>
+                  </div>
+                )}
+                {error && (
+                  <div className="flex items-center gap-2 p-3.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-xs text-rose-300 font-semibold">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                    <span>{error}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* BOTTOM MODAL CONTROLS */}
+            <div className="flex items-center justify-between border-t border-cyan-500/15 pt-5">
+              {currentStep > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep((prev) => (prev - 1) as any)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Back</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              )}
 
               <div className="flex items-center gap-3">
                 {currentStep < 4 ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (currentStep === 1 && execMode === 'standard') {
-                        // Single execution doesn't need loop collection or filter steps
-                        setCurrentStep(4);
-                      } else {
-                        setCurrentStep((prev) => (prev < 4 ? (prev + 1) as any : 4));
-                      }
-                    }}
-                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-2.5 text-xs font-bold text-black shadow-[0_0_18px_rgba(6,182,212,0.4)] hover:shadow-[0_0_24px_rgba(6,182,212,0.65)] hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    onClick={() => setCurrentStep((prev) => (prev + 1) as any)}
+                    className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-black text-xs font-bold hover:shadow-[0_0_20px_rgba(6,182,212,0.4)] transition cursor-pointer"
                   >
                     <span>Next</span>
                     <ChevronRight className="h-4 w-4" />
@@ -1569,17 +1859,21 @@ export function ExecutionPreflightModal({
                   <button
                     type="button"
                     onClick={handleDispatchExecution}
-                    disabled={submitting}
-                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-500 px-7 py-3 text-sm font-extrabold text-slate-950 shadow-[0_0_28px_rgba(6,182,212,0.6)] hover:shadow-[0_0_36px_rgba(6,182,212,0.85)] hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                    disabled={submitting || Boolean(loopValidationError)}
+                    className={`flex items-center gap-2 px-7 py-3 rounded-2xl text-xs font-bold transition shadow-lg cursor-pointer ${
+                      submitting || Boolean(loopValidationError)
+                        ? 'opacity-50 cursor-not-allowed bg-slate-800 text-slate-400'
+                        : 'bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 text-black hover:shadow-[0_0_28px_rgba(6,182,212,0.6)]'
+                    }`}
                   >
                     {submitting ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin text-black" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                         <span>Dispatching...</span>
                       </>
                     ) : (
                       <>
-                        <Play className="h-4 w-4 fill-current ml-0.5" />
+                        <Play className="h-4 w-4 fill-current" />
                         <span>Dispatch Execution</span>
                       </>
                     )}
@@ -1595,5 +1889,3 @@ export function ExecutionPreflightModal({
     </div>
   );
 }
-
-export default ExecutionPreflightModal;
