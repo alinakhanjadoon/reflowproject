@@ -420,6 +420,10 @@ class LoopReplayRunner {
     return this.gridSelectionAdapter.enforceGridRowSingleSelection(page, discovery, targetIndex);
   }
 
+  async executeDropdownOptionSingleSelect(page, targetIndex, targetText = '') {
+    return this.gridSelectionAdapter.executeDropdownOptionSingleSelect(page, targetIndex, targetText);
+  }
+
   async extractItemIdentifier(page, discovery, index, isDropdown = false) {
     return this.itemExecutionHandler.extractItemIdentifier(page, discovery, index, isDropdown);
   }
@@ -1105,7 +1109,12 @@ class LoopReplayRunner {
         logger.info(`================================================================================\n`);
         onProgress({ status: 'PROCESSING_OUTER', outerIndex: c, outerTotal: outerItems.length, outerRecord, manifest });
 
-        // If there are pre-anchor steps (e.g. Open Dropdown/Form) and this is c > 0, re-open the container for next company
+        // If outer collection is a dropdown, verify options are visible; if not, re-open via trigger step
+        const isOuterDropdown = outerDiscovery.isDropdown ||
+          outerDiscovery.collection?.collectionType === 'dropdown-option' ||
+          outerDiscovery.collection?.itemTag === 'mat-option' ||
+          (outerAnchorStep.target?.candidates && outerAnchorStep.target.candidates.some(c => c?.value && /\bmat-option\b/i.test(c.value)));
+
         if (partition.outerAnchorOffset > 0 && c > 0) {
           logger.info(`[Two-Level Loop] Executing ${partition.outerAnchorOffset} outer pre-anchor step(s) to prepare ${nestedConfig.outer.name || 'company'} #${c + 1}...`);
           for (let pIdx = 0; pIdx < partition.outerAnchorOffset; pIdx++) {
@@ -1116,24 +1125,61 @@ class LoopReplayRunner {
             await new Promise(r => setTimeout(r, 800));
           }
           await this._settlePageAsync(page, 15000);
+        } else if (c > 0 && isOuterDropdown) {
+          // If outerAnchorOffset is 0 but this is a dropdown and c > 0, re-open dropdown via trigger step
+          const triggerStepIdx = nestedConfig.outer.anchorStepIndex > 0 ? nestedConfig.outer.anchorStepIndex - 1 : -1;
+          if (triggerStepIdx >= 0 && steps[triggerStepIdx]) {
+            logger.info(`[Two-Level Loop] Re-opening dropdown for ${nestedConfig.outer.name || 'company'} #${c + 1} via trigger step #${triggerStepIdx + 1}...`);
+            await this.replayEngine.executeAction(steps[triggerStepIdx], triggerStepIdx);
+            await new Promise(r => setTimeout(r, 1000));
+            await this._settlePageAsync(page, 15000);
+          }
         }
 
         // 3a. Select current company
-        const outerItemHandle = await ItemDiscovery.getItemHandle(page, outerDiscovery, outerIdx);
-        const outerItemEl = outerItemHandle ? (outerItemHandle.asElement ? outerItemHandle.asElement() : outerItemHandle) : null;
-        if (!outerItemEl) {
-          throw new Error(`Could not resolve DOM element for ${nestedConfig.outer.name} #${c + 1} ("${outerLabel}")`);
+        let outerSelected = false;
+        if (isOuterDropdown) {
+          try {
+            const selectResult = await this.gridSelectionAdapter.executeDropdownOptionSingleSelect(page, outerIdx, outerLabel);
+            if (selectResult && selectResult.success) {
+              outerSelected = true;
+              logger.info(`[Two-Level Loop] Selected ${nestedConfig.outer.name}: "${outerLabel}" (previous selections cleared)`);
+            }
+          } catch (selErr) {
+            logger.warn(`[Two-Level Loop] executeDropdownOptionSingleSelect note: ${selErr.message}`);
+          }
         }
 
-        try {
-          logger.info(`[Two-Level Loop] Selecting ${nestedConfig.outer.name}: "${outerLabel}"`);
-          await this.replayEngine.executeActionWithinItem(
-            outerItemEl,
-            outerAnchorStep,
-            nestedConfig.outer.anchorStepIndex
-          );
-        } finally {
-          await outerItemEl.dispose().catch(() => {});
+        if (!outerSelected) {
+          let outerItemHandle = await ItemDiscovery.getItemHandle(page, outerDiscovery, outerIdx);
+          let outerItemEl = outerItemHandle ? (outerItemHandle.asElement ? outerItemHandle.asElement() : outerItemHandle) : null;
+          if (!outerItemEl && c > 0) {
+            // Dropdown may have closed; attempt trigger re-open
+            const triggerStepIdx = nestedConfig.outer.anchorStepIndex > 0 ? nestedConfig.outer.anchorStepIndex - 1 : -1;
+            if (triggerStepIdx >= 0 && steps[triggerStepIdx]) {
+              logger.info(`[Two-Level Loop] Option element not found in DOM for ${outerLabel}. Re-opening via step #${triggerStepIdx + 1}...`);
+              await this.replayEngine.executeAction(steps[triggerStepIdx], triggerStepIdx);
+              await new Promise(r => setTimeout(r, 1000));
+              await this._settlePageAsync(page, 15000);
+              outerItemHandle = await ItemDiscovery.getItemHandle(page, outerDiscovery, outerIdx);
+              outerItemEl = outerItemHandle ? (outerItemHandle.asElement ? outerItemHandle.asElement() : outerItemHandle) : null;
+            }
+          }
+
+          if (!outerItemEl) {
+            throw new Error(`Could not resolve DOM element for ${nestedConfig.outer.name} #${c + 1} ("${outerLabel}")`);
+          }
+
+          try {
+            logger.info(`[Two-Level Loop] Selecting ${nestedConfig.outer.name}: "${outerLabel}"`);
+            await this.replayEngine.executeActionWithinItem(
+              outerItemEl,
+              outerAnchorStep,
+              nestedConfig.outer.anchorStepIndex
+            );
+          } finally {
+            await outerItemEl.dispose().catch(() => {});
+          }
         }
 
         await new Promise(r => setTimeout(r, 1200));
@@ -1244,6 +1290,11 @@ class LoopReplayRunner {
               actions: []
             };
 
+            // Clear prior grid/checkbox selections so each record is processed cleanly
+            if (m > 0) {
+              await this.clearGridSelections(page, innerDiscovery).catch(() => {});
+            }
+
             // Execute inner item actions
             try {
               for (let actIdx = 0; actIdx < generalizedInnerActions.length; actIdx++) {
@@ -1259,6 +1310,16 @@ class LoopReplayRunner {
                   if (!itemEl) throw new Error(`Could not resolve DOM handle for record #${m + 1} ("${innerLabel}")`);
                   try {
                     await this.replayEngine.executeActionWithinItem(itemEl, act, nestedConfig.inner.startStepIndex + actIdx);
+                  } catch (withinItemErr) {
+                    // Fallback: If action was marked item-scoped but could not be resolved inside the row
+                    // (e.g. table header download button, toolbar button, or modal dialog),
+                    // fall back to executing it at the page level.
+                    if (withinItemErr.message && /Could not resolve action target inside collection item/i.test(withinItemErr.message)) {
+                      logger.warn(`[Two-Level Loop] executeActionWithinItem failed for item #${m + 1} (${withinItemErr.message}); falling back to page-level execution`);
+                      await this.replayEngine.executeAction(act, nestedConfig.inner.startStepIndex + actIdx);
+                    } else {
+                      throw withinItemErr;
+                    }
                   } finally {
                     await itemEl.dispose().catch(() => {});
                   }

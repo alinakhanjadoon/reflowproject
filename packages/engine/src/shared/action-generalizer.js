@@ -252,6 +252,23 @@ class ActionGeneralizer {
       }
     }
 
+    // For row checkboxes: add resilient fallback candidate within the item
+    // in case column indices shifted (e.g. optional date columns)
+    const isCb = Boolean(
+      target.isCheckbox ||
+      target.fingerprint?.isCheckbox ||
+      target.fingerprint?.type === 'checkbox' ||
+      target.fingerprint?.role === 'checkbox'
+    );
+    if (isCb && !generalizedCandidates.some(c => c.value === 'input[type="checkbox"]')) {
+      generalizedCandidates.push({
+        strategy: 'css-path',
+        value: 'input[type="checkbox"], [role="checkbox"]',
+        priority: 4,
+        scope: 'item'
+      });
+    }
+
     return {
       ...target,
       candidates: generalizedCandidates,

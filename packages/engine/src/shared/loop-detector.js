@@ -689,7 +689,21 @@ class LoopDetector {
       }
 
       // Build structured nested loop from flat anchors
-      const outerStart = Number.isInteger(def.outerStartStepIndex) ? def.outerStartStepIndex : outerAnchor;
+      let outerStart = Number.isInteger(def.outerStartStepIndex) ? def.outerStartStepIndex : outerAnchor;
+      if (steps && steps.length > outerAnchor && outerAnchor > 0) {
+        const anchorStep = steps[outerAnchor];
+        const anchorFp = anchorStep?.fingerprint || {};
+        const anchorTag = String(anchorFp.tagName || '').toLowerCase();
+        const anchorRole = String(anchorFp.role || '').toLowerCase();
+        const isOption = anchorTag === 'mat-option' ||
+          anchorRole === 'option' ||
+          anchorTag === 'option' ||
+          (anchorStep?.target?.candidates && anchorStep.target.candidates.some(c => c?.value && /\b(mat-option|role=['"]option['"]|x-boundlist-item|select2-results__option)\b/i.test(c.value)));
+
+        if (isOption && outerStart >= outerAnchor) {
+          outerStart = outerAnchor - 1;
+        }
+      }
       const outerEnd = Number.isInteger(def.outerEndStepIndex) ? def.outerEndStepIndex : (stepCount > 0 ? stepCount - 1 : 0);
       const innerStart = Number.isInteger(def.innerStartStepIndex) ? def.innerStartStepIndex : innerAnchor;
       const innerEnd = Number.isInteger(def.innerEndStepIndex) ? def.innerEndStepIndex : Math.max(innerStart, outerEnd - 1);
@@ -722,7 +736,21 @@ class LoopDetector {
     const outerAnchor = Number.isInteger(outer.anchorStepIndex)
       ? outer.anchorStepIndex
       : (Number.isInteger(outer.loopStepIndex) ? outer.loopStepIndex : 0);
-    const outerStart = Number.isInteger(outer.startStepIndex) ? outer.startStepIndex : outerAnchor;
+    let outerStart = Number.isInteger(outer.startStepIndex) ? outer.startStepIndex : outerAnchor;
+    if (steps && steps.length > outerAnchor && outerAnchor > 0) {
+      const anchorStep = steps[outerAnchor];
+      const anchorFp = anchorStep?.fingerprint || {};
+      const anchorTag = String(anchorFp.tagName || '').toLowerCase();
+      const anchorRole = String(anchorFp.role || '').toLowerCase();
+      const isOption = anchorTag === 'mat-option' ||
+        anchorRole === 'option' ||
+        anchorTag === 'option' ||
+        (anchorStep?.target?.candidates && anchorStep.target.candidates.some(c => c?.value && /\b(mat-option|role=['"]option['"]|x-boundlist-item|select2-results__option)\b/i.test(c.value)));
+
+      if (isOption && outerStart >= outerAnchor) {
+        outerStart = outerAnchor - 1;
+      }
+    }
     const outerEnd = Number.isInteger(outer.endStepIndex) ? outer.endStepIndex : (stepCount > 0 ? stepCount - 1 : 0);
 
     const innerAnchor = Number.isInteger(inner.anchorStepIndex)

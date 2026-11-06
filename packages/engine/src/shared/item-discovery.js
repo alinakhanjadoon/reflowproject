@@ -140,6 +140,14 @@ class ItemDiscovery {
               }
             } else {
               let matches = Array.from(document.querySelectorAll(val)).filter(visible);
+              if (matches.length === 0 && /td:nth-of-type\(\d+\)|td\[\d+\]/i.test(val)) {
+                const relaxedVal = val
+                  .replace(/td:nth-of-type\(\d+\)/gi, 'td')
+                  .replace(/td\[\d+\]/gi, 'td');
+                try {
+                  matches = Array.from(document.querySelectorAll(relaxedVal)).filter(visible);
+                } catch {}
+              }
               // When multiple matches exist across different modal/dialog containers,
               // prioritize the elements residing in the topmost active modal
               if (matches.length > 1) {
@@ -522,6 +530,7 @@ class ItemDiscovery {
 
         candidates.push({
           score,
+          ancestorDepth: ancestors.indexOf(ancestor),
           itemCount: effectiveMatching.length,
           recordedIndex: Math.max(0, index),
           targetColumn: recordedTargetColumn,
@@ -770,9 +779,22 @@ class ItemDiscovery {
       }
 
       candidates.sort((a, b) => {
-        // Multi-item collections must always take precedence over a single-item candidate
-        if ((b.itemCount > 1) !== (a.itemCount > 1)) {
+        // When searching for multi-item collections (minItems >= 2), multi-item takes precedence
+        if (minItems >= 2 && (b.itemCount > 1) !== (a.itemCount > 1)) {
           return b.itemCount > 1 ? 1 : -1;
+        }
+        // Prefer specific table-row or dropdown-option collections over generic wrapper divs
+        if (a.collectionType === 'table-row' && b.collectionType !== 'table-row') {
+          return -1;
+        }
+        if (b.collectionType === 'table-row' && a.collectionType !== 'table-row') {
+          return 1;
+        }
+        // Prefer closer ancestor (more specific container directly holding the items)
+        if (a.ancestorDepth !== undefined && b.ancestorDepth !== undefined && a.ancestorDepth !== b.ancestorDepth) {
+          if (Math.abs(b.score - a.score) < 0.2) {
+            return a.ancestorDepth - b.ancestorDepth;
+          }
         }
         const scoreDiff = b.score - a.score;
         if (Math.abs(scoreDiff) > 0.15) {

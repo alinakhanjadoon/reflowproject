@@ -1074,9 +1074,12 @@ class ItemExecutionHandler {
               action.target?.candidates?.some(c => typeof c?.value === 'string' && /\b(x-grid-row-checker|checker|checkbox)\b/i.test(c.value))
             );
 
-            // On first item action (actionOffset === 0), clear previous selections ONLY when no explicit selection step exists
-            if (actionOffset === 0 && !hasExplicitRowSelection) {
-              await clearGridSelections();
+            // On first item action (actionOffset === 0), clear previous selections
+            // When an explicit selection step exists, clear previous row checkbox on subsequent items (i > 0)
+            if (actionOffset === 0) {
+              if (!hasExplicitRowSelection || i > 0) {
+                await clearGridSelections();
+              }
             }
 
             const itemHandle = await ItemDiscovery.getItemHandle(page, discovery, i);

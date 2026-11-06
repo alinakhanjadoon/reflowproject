@@ -110,13 +110,35 @@ class GridSelectionAdapter {
           const innerCheckboxes = row.querySelectorAll('input[type="checkbox"]:checked');
           for (const cb of innerCheckboxes) {
             cb.checked = false;
+            try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+          }
+        }
+
+        // 2b. Standard HTML / Angular Material / Bootstrap table row checkboxes
+        const allCheckedRowBoxes = document.querySelectorAll(
+          'table tbody tr input[type="checkbox"]:checked, [role="grid"] [role="row"] input[type="checkbox"]:checked'
+        );
+        for (const cb of allCheckedRowBoxes) {
+          cb.checked = false;
+          try { cb.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
+          try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+          const matParent = cb.closest('mat-checkbox, .mat-mdc-checkbox, [role="checkbox"]');
+          if (matParent) {
+            matParent.classList.remove('mat-checkbox-checked', 'mat-mdc-checkbox-checked', 'checked');
+            matParent.setAttribute('aria-checked', 'false');
           }
         }
 
         // 3. Header select-all checker deselect without blind click
-        const headerCheckers = document.querySelectorAll('.x-grid-hd-checker-on, .x-column-header-checkbox.x-grid-hd-checker-on');
+        const headerCheckers = document.querySelectorAll(
+          '.x-grid-hd-checker-on, .x-column-header-checkbox.x-grid-hd-checker-on, table thead input[type="checkbox"]:checked, [role="columnheader"] input[type="checkbox"]:checked'
+        );
         for (const hc of headerCheckers) {
           hc.classList.remove('x-grid-hd-checker-on');
+          if (hc.tagName === 'INPUT' && hc.type === 'checkbox') {
+            hc.checked = false;
+            try { hc.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+          }
         }
       });
       await new Promise(r => setTimeout(r, 100));
