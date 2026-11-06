@@ -76,30 +76,40 @@ function getWorkflowSteps(workflow: Workflow | null): any[] {
 function detectTwoLevelCandidates(steps: Array<any>): {
   hasTwoLevel: boolean;
   dropdownStepIndex: number;
+  outerStartIndex: number;
   tableStepIndex: number;
+  innerStartIndex: number;
+  innerEndIndex: number;
 } {
   if (!Array.isArray(steps) || steps.length < 3) {
-    return { hasTwoLevel: false, dropdownStepIndex: -1, tableStepIndex: -1 };
+    return { hasTwoLevel: false, dropdownStepIndex: -1, outerStartIndex: 0, tableStepIndex: -1, innerStartIndex: 0, innerEndIndex: 0 };
   }
 
-  const isAuthOrSetup = (s: any) => {
+  const isScrollOrNav = (s: any) => {
+    if (!s) return true;
+    const type = String(s.type || s.action || '').toUpperCase();
+    const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
+    return type === 'SCROLL' || type === 'NAVIGATE' || /scroll/i.test(name);
+  };
+
+  const isAuth = (s: any) => {
     if (!s) return false;
     const name = String(s.name || s.elementName || s.target?.elementName || s.target?.friendlyName || '').toLowerCase();
-    const type = String(s.type || s.action || '').toUpperCase();
     const tag = String(s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toLowerCase();
     const inputType = String(s.target?.fingerprint?.type || s.fingerprint?.type || '').toLowerCase();
-    if (type === 'NAVIGATE' || type === 'SCROLL' || /scroll/i.test(name)) return true;
     if (/(username|password|email|sign[-_\s]*in|login|authenticat)/i.test(name)) return true;
     if (tag === 'input' && (inputType === 'password' || inputType === 'email')) return true;
     return false;
   };
 
   let dropdownStepIndex = -1;
+  let outerStartIndex = -1;
   let tableStepIndex = -1;
 
+  // Pass 1: Find Company Anchor
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
-    if (isAuthOrSetup(s)) continue;
+    if (isScrollOrNav(s) || isAuth(s)) continue;
 
     const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
     const role = (s.target?.fingerprint?.role || '').toLowerCase();
@@ -107,38 +117,86 @@ function detectTwoLevelCandidates(steps: Array<any>): {
     const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
     const selectors = candidates.map((c: any) => c.value || '').join(' ');
 
-    const isOptionOrDropdown = Boolean(
-      tag === 'MAT-OPTION' || tag === 'OPTION' || tag === 'LI' ||
-      role === 'option' || role === 'listitem' ||
-      /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|li:nth-child|data-company)\b/i.test(selectors)
+    const isOptionItem = Boolean(
+      tag === 'MAT-OPTION' || tag === 'OPTION' || role === 'option' ||
+      /\b(mat-option|\[role=["']option["']\]|select\s*>\s*option|tt-suggestion|data-company|x-boundlist-item)\b/i.test(selectors)
     );
 
-    const isCompanyKeyword = /(company|customer|account|location|organization|org\b|client)/i.test(text) ||
-      /(company|customer|account)/i.test(selectors);
+    const isCompanyItem = /(company|customer|account|entity)/i.test(text) || /(company|customer|account|entity)/i.test(selectors);
 
-    if (dropdownStepIndex === -1 && (isOptionOrDropdown || (isCompanyKeyword && (s.action === 'CLICK' || s.type === 'CLICK' || s.action === 'SELECT')))) {
+    if (isOptionItem && (isCompanyItem || !/select\s*all/i.test(text))) {
       dropdownStepIndex = i;
-      continue;
+      break;
     }
+  }
 
-    const isTableOrRow = Boolean(
-      tag === 'TR' || tag === 'TD' || role === 'row' || role === 'gridcell' ||
-      /\b(tr\b|tbody|x-grid|table|gridcell|ui-grid|row)\b/i.test(selectors) ||
-      s.role === 'LOOP' || s.isLoop || s.extract_table
-    );
-
-    const isRecordKeyword = /(invoice|record|bill|order|item|document|statement|entry|row)/i.test(text);
-
-    if (dropdownStepIndex !== -1 && tableStepIndex === -1 && i > dropdownStepIndex) {
-      if (isTableOrRow || isRecordKeyword) {
-        tableStepIndex = i;
+  // Fallback for Company Anchor if no mat-option/tt-suggestion found
+  if (dropdownStepIndex === -1) {
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      if (isScrollOrNav(s) || isAuth(s)) continue;
+      const text = (s.name || s.elementName || s.description || '').toLowerCase();
+      const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+      const selectors = candidates.map((c: any) => c.value || '').join(' ');
+      if (/(company|customer|account|entity)/i.test(text) && !/change company button|submit/i.test(text) && !/menu|link/i.test(text)) {
+        dropdownStepIndex = i;
         break;
       }
     }
   }
 
+  // Determine outerStartIndex: look back from dropdownStepIndex for the trigger that opened the dropdown/menu/modal
+  if (dropdownStepIndex > 0) {
+    outerStartIndex = dropdownStepIndex;
+    for (let j = dropdownStepIndex - 1; j >= 0; j--) {
+      const ps = steps[j];
+      if (isAuth(ps) || isScrollOrNav(ps)) break;
+      const ptext = (ps.name || ps.elementName || ps.description || '').toLowerCase();
+      const pcandidates = Array.isArray(ps.target?.candidates) ? ps.target.candidates : [];
+      const pselectors = pcandidates.map((c: any) => c.value || '').join(' ');
+      if (/(company|customer|select\s*all|entity|charge\s*up)/i.test(ptext) || /(mat-select|select|dropdown|entity)/i.test(pselectors)) {
+        outerStartIndex = j;
+      } else {
+        break;
+      }
+    }
+  } else {
+    outerStartIndex = 0;
+  }
+
+  // Pass 2: Find Record Anchor (Level 2)
+  const minTableIndex = dropdownStepIndex !== -1 ? dropdownStepIndex + 1 : 0;
+  for (let i = minTableIndex; i < steps.length; i++) {
+    const s = steps[i];
+    if (isScrollOrNav(s) || isAuth(s)) continue;
+
+    const tag = (s.target?.fingerprint?.tagName || s.fingerprint?.tagName || '').toUpperCase();
+    const role = (s.target?.fingerprint?.role || '').toLowerCase();
+    const candidates = Array.isArray(s.target?.candidates) ? s.target.candidates : [];
+    const selectors = candidates.map((c: any) => c.value || '').join(' ');
+    const text = (s.name || s.elementName || s.description || '').toLowerCase();
+
+    // Exclude header buttons or top navigation links (e.g. "Invoices Link")
+    if (/menu-link|screen-text|button#|btnChange/i.test(selectors)) continue;
+    if (tag === 'A' && /invoices\s*link/i.test(text)) continue;
+
+    const isTableRecord = Boolean(
+      tag === 'TR' || tag === 'TD' || role === 'row' || role === 'gridcell' ||
+      s.isCheckbox || (tag === 'INPUT' && s.target?.fingerprint?.type === 'checkbox') ||
+      /\b(tr\b|td\b|tbody|x-grid-item|x-grid-row|x-grid-cell|gridcell|table.*input)\b/i.test(selectors)
+    );
+
+    if (isTableRecord) {
+      tableStepIndex = i;
+      break;
+    }
+  }
+
+  const innerStartIndex = tableStepIndex !== -1 ? tableStepIndex : 0;
+  const innerEndIndex = steps.length > 0 ? steps.length - 1 : 0;
+
   const hasTwoLevel = dropdownStepIndex !== -1 && tableStepIndex !== -1 && tableStepIndex > dropdownStepIndex;
-  return { hasTwoLevel, dropdownStepIndex, tableStepIndex };
+  return { hasTwoLevel, dropdownStepIndex, outerStartIndex, tableStepIndex, innerStartIndex, innerEndIndex };
 }
 
 function detectLoopCandidate(steps: Array<any>): number {
@@ -328,7 +386,9 @@ function formatStepLabel(step: any, idx: number): string {
   if (!step) return `Step #${idx + 1}`;
   const label = step.name || step.elementName || step.target?.friendlyName || step.target?.elementName || step.description || step.type || 'Action';
   const role = step.role === 'LOOP' ? ' [LOOP]' : '';
-  return `Step #${idx + 1}: ${label}${role}`;
+  const type = String(step.type || step.action || '').toUpperCase();
+  const typeBadge = type === 'SCROLL' ? ' (Scroll)' : '';
+  return `Step #${idx + 1}: ${label}${typeBadge}${role}`;
 }
 
 export function ExecutionPreflightModal({
@@ -428,11 +488,11 @@ export function ExecutionPreflightModal({
     if (twoLevelInfo.hasTwoLevel) {
       setIsTwoLevel(true);
       setOuterAnchorIndex(twoLevelInfo.dropdownStepIndex);
-      setOuterStartIndex(twoLevelInfo.dropdownStepIndex);
+      setOuterStartIndex(twoLevelInfo.outerStartIndex !== undefined && twoLevelInfo.outerStartIndex >= 0 ? twoLevelInfo.outerStartIndex : twoLevelInfo.dropdownStepIndex);
       setOuterEndIndex(steps.length > 0 ? steps.length - 1 : 0);
       setInnerAnchorIndex(twoLevelInfo.tableStepIndex);
-      setInnerStartIndex(twoLevelInfo.tableStepIndex);
-      setInnerEndIndex(Math.max(twoLevelInfo.tableStepIndex, steps.length - 1));
+      setInnerStartIndex(twoLevelInfo.innerStartIndex !== undefined && twoLevelInfo.innerStartIndex >= 0 ? twoLevelInfo.innerStartIndex : twoLevelInfo.tableStepIndex);
+      setInnerEndIndex(twoLevelInfo.innerEndIndex !== undefined && twoLevelInfo.innerEndIndex >= 0 ? twoLevelInfo.innerEndIndex : Math.max(twoLevelInfo.tableStepIndex, steps.length - 1));
     } else {
       setIsTwoLevel(false);
     }
