@@ -382,13 +382,67 @@ function extractFieldValuesMap(workflow: Workflow | null): Record<string, string
   return finalMap;
 }
 
-function formatStepLabel(step: any, idx: number): string {
+function isBadCompanyAnchor(step: any): boolean {
+  if (!step) return true;
+  const type = String(step.type || step.action || '').toUpperCase();
+  const name = String(step.name || step.elementName || step.target?.friendlyName || step.target?.elementName || '').toLowerCase();
+  const tag = String(step.target?.fingerprint?.tagName || step.fingerprint?.tagName || '').toUpperCase();
+  const candidates = Array.isArray(step.target?.candidates) ? step.target.candidates : [];
+  const selectors = candidates.map((c: any) => c.value || '').join(' ');
+
+  if (type === 'SCROLL' || type === 'NAVIGATE' || /scroll|navigate|open portal/i.test(name)) return true;
+  if (/username|password|login/i.test(name)) return true;
+  if (tag === 'BUTTON' && /change company|submit|confirm|yes|close|export/i.test(name) && !/tt-suggestion|mat-option|option/i.test(selectors)) return true;
+  return false;
+}
+
+function isBadRecordAnchor(step: any): boolean {
+  if (!step) return true;
+  const type = String(step.type || step.action || '').toUpperCase();
+  const name = String(step.name || step.elementName || step.target?.friendlyName || step.target?.elementName || '').toLowerCase();
+  const tag = String(step.target?.fingerprint?.tagName || step.fingerprint?.tagName || '').toUpperCase();
+  if (type === 'SCROLL' || type === 'NAVIGATE' || /scroll|navigate|open portal/i.test(name)) return true;
+  if (/export|download|open selected|search button|login|submit/i.test(name)) return true;
+  if (tag === 'BUTTON' && /export|download|search|submit|login|yes|no|close/i.test(name)) return true;
+  return false;
+}
+
+function formatStepLabel(
+  step: any,
+  idx: number,
+  context?: {
+    recommendedCompanyIndex?: number;
+    recommendedRecordIndex?: number;
+    type?: 'company' | 'record' | 'single';
+  }
+): string {
   if (!step) return `Step #${idx + 1}`;
   const label = step.name || step.elementName || step.target?.friendlyName || step.target?.elementName || step.description || step.type || 'Action';
   const role = step.role === 'LOOP' ? ' [LOOP]' : '';
   const type = String(step.type || step.action || '').toUpperCase();
-  const typeBadge = type === 'SCROLL' ? ' (Scroll)' : '';
-  return `Step #${idx + 1}: ${label}${typeBadge}${role}`;
+  const isScroll = type === 'SCROLL' || /scroll/i.test(label);
+  const isNav = type === 'NAVIGATE' || /navigate|open portal/i.test(label);
+  const isActionBtn = /export|download|open selected|submit|login/i.test(label);
+
+  let recommendation = '';
+  if (context?.type === 'company' && idx === context?.recommendedCompanyIndex) {
+    recommendation = ' ⭐ (Recommended Company Anchor)';
+  } else if (context?.type === 'record' && idx === context?.recommendedRecordIndex) {
+    recommendation = ' ⭐ (Recommended Record Anchor)';
+  } else if (context?.type === 'single' && (idx === context?.recommendedRecordIndex || idx === context?.recommendedCompanyIndex)) {
+    recommendation = ' ⭐ (Recommended Collection Anchor)';
+  }
+
+  let badBadge = '';
+  if (isScroll) {
+    badBadge = ' 🚫 (Scroll - not an anchor)';
+  } else if (isNav) {
+    badBadge = ' 🚫 (Navigation)';
+  } else if (context?.type === 'record' && isActionBtn) {
+    badBadge = ' 🚫 (Action button - not a row)';
+  }
+
+  return `Step #${idx + 1}: ${label}${badBadge}${role}${recommendation}`;
 }
 
 export function ExecutionPreflightModal({
@@ -489,10 +543,11 @@ export function ExecutionPreflightModal({
       setIsTwoLevel(true);
       setOuterAnchorIndex(twoLevelInfo.dropdownStepIndex);
       setOuterStartIndex(twoLevelInfo.outerStartIndex !== undefined && twoLevelInfo.outerStartIndex >= 0 ? twoLevelInfo.outerStartIndex : twoLevelInfo.dropdownStepIndex);
-      setOuterEndIndex(steps.length > 0 ? steps.length - 1 : 0);
+      const innerEnd = twoLevelInfo.innerEndIndex !== undefined && twoLevelInfo.innerEndIndex >= 0 ? twoLevelInfo.innerEndIndex : Math.max(twoLevelInfo.tableStepIndex, steps.length - 1);
+      setOuterEndIndex(innerEnd);
       setInnerAnchorIndex(twoLevelInfo.tableStepIndex);
       setInnerStartIndex(twoLevelInfo.innerStartIndex !== undefined && twoLevelInfo.innerStartIndex >= 0 ? twoLevelInfo.innerStartIndex : twoLevelInfo.tableStepIndex);
-      setInnerEndIndex(twoLevelInfo.innerEndIndex !== undefined && twoLevelInfo.innerEndIndex >= 0 ? twoLevelInfo.innerEndIndex : Math.max(twoLevelInfo.tableStepIndex, steps.length - 1));
+      setInnerEndIndex(innerEnd);
     } else {
       setIsTwoLevel(false);
     }
@@ -1128,11 +1183,17 @@ export function ExecutionPreflightModal({
                               }}
                               className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
                             >
-                              {steps.map((step: any, idx: number) => (
-                                <option key={idx} value={idx}>
-                                  {formatStepLabel(step, idx)}
-                                </option>
-                              ))}
+                              {steps.map((step: any, idx: number) => {
+                                const bad = isBadCompanyAnchor(step);
+                                return (
+                                  <option key={idx} value={idx} disabled={bad}>
+                                    {formatStepLabel(step, idx, {
+                                      type: 'company',
+                                      recommendedCompanyIndex: twoLevelInfo.dropdownStepIndex
+                                    })}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </div>
 
@@ -1155,18 +1216,24 @@ export function ExecutionPreflightModal({
                             </div>
                             <div>
                               <label className="block text-[11px] text-slate-400 mb-1">
-                                Return Step to Company View (Outer End)
+                                Return Step to Company View (Optional)
                               </label>
                               <select
-                                value={outerEndIndex}
+                                value={outerEndIndex <= innerEndIndex ? innerEndIndex : outerEndIndex}
                                 onChange={(e) => setOuterEndIndex(parseInt(e.target.value, 10))}
                                 className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
                               >
-                                {steps.map((step: any, idx: number) => (
-                                  <option key={idx} value={idx}>
-                                    #{idx + 1}: {formatStepLabel(step, idx)}
-                                  </option>
-                                ))}
+                                <option value={innerEndIndex}>
+                                  None (Automatic return via Outer Start Step)
+                                </option>
+                                {steps.slice(innerEndIndex + 1).map((step: any, offset: number) => {
+                                  const idx = innerEndIndex + 1 + offset;
+                                  return (
+                                    <option key={idx} value={idx}>
+                                      #{idx + 1}: {formatStepLabel(step, idx)}
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </div>
                           </div>
@@ -1199,11 +1266,17 @@ export function ExecutionPreflightModal({
                               }}
                               className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
                             >
-                              {steps.map((step: any, idx: number) => (
-                                <option key={idx} value={idx}>
-                                  {formatStepLabel(step, idx)}
-                                </option>
-                              ))}
+                              {steps.map((step: any, idx: number) => {
+                                const bad = isBadRecordAnchor(step);
+                                return (
+                                  <option key={idx} value={idx} disabled={bad}>
+                                    {formatStepLabel(step, idx, {
+                                      type: 'record',
+                                      recommendedRecordIndex: twoLevelInfo.tableStepIndex
+                                    })}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </div>
 
@@ -1242,6 +1315,34 @@ export function ExecutionPreflightModal({
                             </div>
                           </div>
                         </div>
+
+                        {/* 4 Interactive Phase Breakdown Cards for Two-Level Mode */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-center text-xs">
+                          <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60">
+                            <span className="text-[10px] text-slate-400 block font-medium">Phase 1: Initial Setup</span>
+                            <span className="font-semibold text-slate-200 mt-0.5 block truncate">
+                              {outerStartIndex > 0 ? `Steps 1..${outerStartIndex} (1x)` : 'None'}
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-xl border border-cyan-500/30 bg-cyan-950/20">
+                            <span className="text-[10px] text-cyan-400 block font-medium">Phase 2: Company Selection</span>
+                            <span className="font-bold text-cyan-300 mt-0.5 block truncate">
+                              Steps {outerStartIndex + 1}..{innerStartIndex} (Per Co.)
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20">
+                            <span className="text-[10px] text-emerald-400 block font-medium">Phase 3: Record Processing</span>
+                            <span className="font-bold text-emerald-300 mt-0.5 block truncate">
+                              Steps {innerStartIndex + 1}..{innerEndIndex + 1} (Per Item)
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60">
+                            <span className="text-[10px] text-slate-400 block font-medium">Phase 4: Return / Teardown</span>
+                            <span className="font-semibold text-slate-200 mt-0.5 block truncate">
+                              {outerEndIndex > innerEndIndex ? `Step #${outerEndIndex + 1}` : 'Automatic Return'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       /* SINGLE COLLECTION LOOP */
@@ -1267,10 +1368,14 @@ export function ExecutionPreflightModal({
                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
                           >
                             {steps.map((step: any, idx: number) => {
-                              const isDetected = idx === detectLoopCandidate(steps);
+                              const bad = isBadRecordAnchor(step);
+                              const detectedIdx = twoLevelInfo.tableStepIndex !== -1 ? twoLevelInfo.tableStepIndex : detectLoopCandidate(steps);
                               return (
-                                <option key={idx} value={idx}>
-                                  {formatStepLabel(step, idx)} {isDetected ? '(Auto-detected Collection Anchor)' : ''}
+                                <option key={idx} value={idx} disabled={bad}>
+                                  {formatStepLabel(step, idx, {
+                                    type: 'single',
+                                    recommendedRecordIndex: detectedIdx
+                                  })}
                                 </option>
                               );
                             })}
@@ -1365,31 +1470,58 @@ export function ExecutionPreflightModal({
                     </span>
                   </div>
 
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                     {steps.map((step: any, idx: number) => {
-                      const isCompany = isTwoLevel && idx === outerAnchorIndex;
-                      const isRecord = (isTwoLevel && idx === innerAnchorIndex) || (!isTwoLevel && idx === anchorStepIndex);
-                      const inLoop = isTwoLevel
-                        ? (idx >= innerStartIndex && idx <= innerEndIndex)
-                        : (idx >= startStepIndex && idx <= endStepIndex);
-                      const isSetup = isTwoLevel ? (idx < outerStartIndex) : (idx < startStepIndex);
-                      const isTeardown = isTwoLevel ? (idx > outerEndIndex) : (idx > endStepIndex);
+                      let phaseBorder = 'border-slate-800/80 bg-slate-900/40 text-slate-400';
+                      let badge = null;
+
+                      if (isTwoLevel) {
+                        if (idx < outerStartIndex) {
+                          phaseBorder = 'border-slate-800 bg-slate-900/50 text-slate-300';
+                          badge = <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px] font-medium">⚙️ Setup (1x)</span>;
+                        } else if (idx === outerAnchorIndex) {
+                          phaseBorder = 'border-cyan-400 bg-cyan-950/30 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.25)]';
+                          badge = <span className="rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400 px-2 py-0.5 text-[9px] font-bold">⭐ Level 1: Company Anchor</span>;
+                        } else if (idx >= outerStartIndex && idx < innerStartIndex) {
+                          phaseBorder = 'border-cyan-500/20 bg-cyan-950/10 text-cyan-300';
+                          badge = <span className="rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 text-[9px] font-medium">🏢 Level 1: Company Switch</span>;
+                        } else if (idx === innerAnchorIndex) {
+                          phaseBorder = 'border-emerald-400 bg-emerald-950/30 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.25)]';
+                          badge = <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400 px-2 py-0.5 text-[9px] font-bold">⭐ Level 2: Record Anchor</span>;
+                        } else if (idx >= innerStartIndex && idx <= innerEndIndex) {
+                          phaseBorder = 'border-emerald-500/20 bg-emerald-950/10 text-emerald-300';
+                          badge = <span className="rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[9px] font-medium">📄 Level 2: Repeat per Record</span>;
+                        } else if (idx > innerEndIndex && idx <= outerEndIndex) {
+                          phaseBorder = 'border-purple-500/30 bg-purple-950/15 text-purple-300';
+                          badge = <span className="rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 px-2 py-0.5 text-[9px] font-medium">↩️ Return Step</span>;
+                        } else {
+                          phaseBorder = 'border-slate-800 bg-slate-900/50 text-slate-400';
+                          badge = <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px] font-medium">🧹 Teardown (1x)</span>;
+                        }
+                      } else {
+                        // Single loop mode
+                        if (idx < startStepIndex) {
+                          phaseBorder = 'border-slate-800 bg-slate-900/50 text-slate-300';
+                          badge = <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px] font-medium">⚙️ Setup (1x)</span>;
+                        } else if (idx === anchorStepIndex) {
+                          phaseBorder = 'border-cyan-400 bg-cyan-950/30 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.25)]';
+                          badge = <span className="rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400 px-2 py-0.5 text-[9px] font-bold">⭐ Collection Anchor</span>;
+                        } else if (idx >= startStepIndex && idx <= endStepIndex) {
+                          phaseBorder = 'border-cyan-500/20 bg-cyan-950/10 text-cyan-300';
+                          badge = <span className="rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 text-[9px] font-medium">🔁 Loop Action</span>;
+                        } else {
+                          phaseBorder = 'border-slate-800 bg-slate-900/50 text-slate-400';
+                          badge = <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px] font-medium">🧹 Teardown (1x)</span>;
+                        }
+                      }
 
                       return (
                         <div
                           key={idx}
-                          className={`flex items-center justify-between p-2 rounded-xl border text-xs transition-colors ${
-                            isRecord
-                              ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-200'
-                              : isCompany
-                              ? 'border-cyan-500/50 bg-cyan-950/20 text-cyan-200'
-                              : inLoop
-                              ? 'border-cyan-500/25 bg-cyan-950/10 text-slate-200'
-                              : 'border-slate-800/80 bg-slate-900/40 text-slate-400'
-                          }`}
+                          className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-colors ${phaseBorder}`}
                         >
                           <div className="flex items-center gap-2 truncate">
-                            <span className="font-mono font-bold text-[11px] text-slate-400">
+                            <span className="font-mono font-bold text-[11px] opacity-75">
                               #{idx + 1}
                             </span>
                             <span className="truncate font-medium">
@@ -1398,37 +1530,21 @@ export function ExecutionPreflightModal({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {isCompany && (
-                              <span className="rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 text-[9px] font-bold">
-                                Company Anchor
-                              </span>
-                            )}
-                            {isRecord && (
-                              <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 text-[9px] font-bold">
-                                Record Anchor
-                              </span>
-                            )}
-                            {!isCompany && !isRecord && inLoop && (
-                              <span className="rounded-full bg-cyan-500/10 text-cyan-400 px-2 py-0.5 text-[9px] font-medium">
-                                🔁 Loop
-                              </span>
-                            )}
-                            {isSetup && (
-                              <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px]">
-                                Setup (1x)
-                              </span>
-                            )}
-                            {isTeardown && (
-                              <span className="rounded-full bg-slate-800 text-slate-400 px-2 py-0.5 text-[9px]">
-                                Teardown (1x)
-                              </span>
-                            )}
+                            {badge}
                           </div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
+
+                {/* Validation Error Alert if misconfigured */}
+                {loopValidationError && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl border border-rose-500/40 bg-rose-500/10 text-xs text-rose-300 font-semibold">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                    <span>{loopValidationError}</span>
+                  </div>
+                )}
               </div>
             )}
 

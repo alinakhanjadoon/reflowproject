@@ -1116,15 +1116,65 @@ class LoopReplayRunner {
           (outerAnchorStep.target?.candidates && outerAnchorStep.target.candidates.some(c => c?.value && /\bmat-option\b/i.test(c.value)));
 
         if (partition.outerAnchorOffset > 0 && c > 0) {
+          // Clean up auxiliary popup/report tabs and lingering dialogs from previous company
+          if (this.replayEngine?.tabManager?.cleanupAuxiliaryTabs) {
+            await this.replayEngine.tabManager.cleanupAuxiliaryTabs().catch(() => {});
+          }
+          if (this.replayEngine?.interruptionHandler?.clearLingeringDialogs) {
+            await this.replayEngine.interruptionHandler.clearLingeringDialogs(page).catch(() => {});
+          }
+
+          // If an ExtJS search/invoices window is open, close it cleanly so top navbar link is unobstructed
+          await page.evaluate(() => {
+            const closeBtns = Array.from(document.querySelectorAll('.x-window:not(.x-hidden) a.x-tool-close, .x-window:not(.x-hidden) a.x-btn'));
+            for (const btn of closeBtns) {
+              if (/close/i.test(btn.innerText || btn.title || btn.getAttribute('aria-label') || '')) {
+                btn.click();
+                break;
+              }
+            }
+          }).catch(() => {});
+          await new Promise(r => setTimeout(r, 400));
+
           logger.info(`[Two-Level Loop] Executing ${partition.outerAnchorOffset} outer pre-anchor step(s) to prepare ${nestedConfig.outer.name || 'company'} #${c + 1}...`);
           for (let pIdx = 0; pIdx < partition.outerAnchorOffset; pIdx++) {
             const preAnchorStep = partition.outerPreSteps[pIdx];
             const absStepIdx = nestedConfig.outer.startStepIndex + pIdx;
-            logger.info(`[Two-Level Loop] Pre-anchor step #${absStepIdx + 1}: ${preAnchorStep.name || preAnchorStep.elementName || preAnchorStep.type || 'Action'}`);
-            await this.replayEngine.executeAction(preAnchorStep, absStepIdx);
+
+            // Prioritize structural navigation candidates if step targeted a company-specific label that may have changed
+            let stepToExec = preAnchorStep;
+            if (preAnchorStep.target?.candidates) {
+              const hasOldCompanyText = preAnchorStep.target.candidates.some(cand => cand?.value && /charge up|company/i.test(cand.value));
+              const structural = preAnchorStep.target.candidates.find(cand => cand?.value && /nav|dropdown-toggle|data-toggle|btnChangeEntity/i.test(cand.value));
+              if (hasOldCompanyText && structural) {
+                stepToExec = {
+                  ...preAnchorStep,
+                  target: {
+                    ...preAnchorStep.target,
+                    candidates: [structural, ...preAnchorStep.target.candidates.filter(cand => cand !== structural)]
+                  }
+                };
+              }
+            }
+
+            logger.info(`[Two-Level Loop] Pre-anchor step #${absStepIdx + 1}: ${stepToExec.name || stepToExec.elementName || stepToExec.type || 'Action'}`);
+            await this.replayEngine.executeAction(stepToExec, absStepIdx);
             await new Promise(r => setTimeout(r, 800));
           }
           await this._settlePageAsync(page, 15000);
+
+          // If a Typeahead modal (like #portalEntity) opened, ensure input is focused and dropdown open
+          await page.evaluate(() => {
+            const typeaheadInput = document.querySelector('#formChangeEntity input, #portalEntity input[type="text"], input.typeahead, input.tt-input');
+            if (typeaheadInput) {
+              typeaheadInput.focus();
+              typeaheadInput.click();
+              if (window.$ && typeof window.$(typeaheadInput).typeahead === 'function') {
+                try { window.$(typeaheadInput).typeahead('open'); } catch {}
+              }
+            }
+          }).catch(() => {});
+          await new Promise(r => setTimeout(r, 600));
         } else if (c > 0 && isOuterDropdown) {
           // If outerAnchorOffset is 0 but this is a dropdown and c > 0, re-open dropdown via trigger step
           const triggerStepIdx = nestedConfig.outer.anchorStepIndex > 0 ? nestedConfig.outer.anchorStepIndex - 1 : -1;
@@ -1166,19 +1216,56 @@ class LoopReplayRunner {
             }
           }
 
+          // Fallback: Resolve company option directly by text / label / id across visible suggestion elements
+          if (!outerItemEl) {
+            outerItemHandle = await page.evaluateHandle(({ label, id, idx }) => {
+              const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+              const normLabel = norm(label);
+              const normId = norm(id);
+              const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el) || {};
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+              };
+              const candidates = Array.from(document.querySelectorAll(
+                '.tt-suggestion, mat-option, [role="option"], option, .x-boundlist-item, li.select2-results__option, #formChangeEntity div.tt-selectable'
+              )).filter(visible);
+
+              if (candidates.length === 0) return null;
+              if (normLabel) {
+                const m = candidates.find(cand => norm(cand.innerText || cand.textContent || '').includes(normLabel));
+                if (m) return m;
+              }
+              if (normId) {
+                const m = candidates.find(cand => norm(cand.innerText || cand.textContent || '').includes(normId));
+                if (m) return m;
+              }
+              if (candidates[idx]) return candidates[idx];
+              return null;
+            }, { label: outerLabel, id: outerId, idx: outerIdx }).catch(() => null);
+
+            outerItemEl = outerItemHandle ? (outerItemHandle.asElement ? outerItemHandle.asElement() : outerItemHandle) : null;
+          }
+
           if (!outerItemEl) {
             throw new Error(`Could not resolve DOM element for ${nestedConfig.outer.name} #${c + 1} ("${outerLabel}")`);
           }
 
           try {
             logger.info(`[Two-Level Loop] Selecting ${nestedConfig.outer.name}: "${outerLabel}"`);
-            await this.replayEngine.executeActionWithinItem(
-              outerItemEl,
-              outerAnchorStep,
-              nestedConfig.outer.anchorStepIndex
-            );
+            try {
+              await this.replayEngine.executeActionWithinItem(
+                outerItemEl,
+                outerAnchorStep,
+                nestedConfig.outer.anchorStepIndex
+              );
+            } catch (withinItemErr) {
+              logger.warn(`[Two-Level Loop] executeActionWithinItem for ${outerLabel} note: ${withinItemErr.message}. Falling back to direct element click.`);
+              await outerItemEl.click().catch(() => {});
+            }
           } finally {
-            await outerItemEl.dispose().catch(() => {});
+            if (outerItemEl) await outerItemEl.dispose().catch(() => {});
           }
         }
 
@@ -1201,16 +1288,44 @@ class LoopReplayRunner {
         }
 
         // 3c. Fresh discovery of Inner Collection for THIS company
-        const innerAnchorStep = partition.innerLoopSteps[partition.innerAnchorOffset];
+        let innerAnchorStep = partition.innerLoopSteps[partition.innerAnchorOffset];
         if (!innerAnchorStep) {
           throw new Error(`Inner anchor action not found at step #${nestedConfig.inner.anchorStepIndex + 1}`);
         }
 
         logger.info(`[Two-Level Loop] Discovering inner collection (${nestedConfig.inner.name || 'records'}) for ${outerLabel}...`);
-        const innerDiscovery = await ItemDiscovery.discover(page, innerAnchorStep.target || innerAnchorStep.fingerprint, {
+        let innerDiscovery = await ItemDiscovery.discover(page, innerAnchorStep.target || innerAnchorStep.fingerprint, {
           minItems: 1,
           minScore: 0.45
         }).catch(err => ({ success: false, reason: err.message, itemCount: 0 }));
+
+        // Self-healing: if innerAnchorStep found 0 items (e.g. anchor was set to a scroll container or non-row element),
+        // scan candidate steps within the workflow for an actual repeating table row / cell action (e.g. td, tr, x-grid-cell-inner, or checkbox)
+        if (!innerDiscovery || !innerDiscovery.success || innerDiscovery.itemCount === 0) {
+          for (let sIdx = nestedConfig.inner.startStepIndex; sIdx <= Math.min(steps.length - 1, nestedConfig.inner.endStepIndex + 2); sIdx++) {
+            const candidateStep = steps[sIdx];
+            if (!candidateStep || sIdx === nestedConfig.inner.anchorStepIndex) continue;
+            const cTag = (candidateStep.target?.fingerprint?.tagName || candidateStep.fingerprint?.tagName || '').toUpperCase();
+            const cCandidates = Array.isArray(candidateStep.target?.candidates) ? candidateStep.target.candidates : [];
+            const isDataCandidate = cTag === 'TR' || cTag === 'TD' || candidateStep.isCheckbox ||
+              cCandidates.some(c => c?.value && /\b(x-grid-cell|tr\b|td\b|tbody|table|checkbox)\b/i.test(c.value));
+            if (isDataCandidate) {
+              const fallbackDisc = await ItemDiscovery.discover(page, candidateStep.target || candidateStep.fingerprint, {
+                minItems: 1,
+                minScore: 0.45
+              }).catch(() => null);
+              if (fallbackDisc && fallbackDisc.success && fallbackDisc.itemCount > 0) {
+                logger.info(`[Two-Level Loop] Auto-corrected inner anchor from step #${nestedConfig.inner.anchorStepIndex + 1} to data row step #${sIdx + 1} (${fallbackDisc.itemCount} records discovered).`);
+                innerDiscovery = fallbackDisc;
+                innerAnchorStep = candidateStep;
+                if (sIdx >= nestedConfig.inner.startStepIndex && sIdx <= nestedConfig.inner.endStepIndex) {
+                  partition.innerAnchorOffset = sIdx - nestedConfig.inner.startStepIndex;
+                }
+                break;
+              }
+            }
+          }
+        }
 
         if (!innerDiscovery || !innerDiscovery.success || innerDiscovery.itemCount === 0) {
           logger.info(`[Two-Level Loop] No records found for ${outerLabel} (0 records). Moving to return step for next company.`);
